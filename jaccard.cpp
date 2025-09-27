@@ -241,6 +241,7 @@ int main(int argc, char* argv[]) {
 
     // Output norms and names to a text file, and all vectors as byte-packed int32 to a binary file
     std::ofstream norm_out(index_folder + "vector_norms.txt");
+    std::ofstream dim_out(index_folder + "dimension.txt");
     std::ofstream bin_out(index_folder + "vectors.bin", std::ios::binary);
     if (!norm_out) {
         std::cerr << "Error opening vector_norms.txt for writing." << std::endl;
@@ -248,8 +249,8 @@ int main(int argc, char* argv[]) {
     if (!bin_out) {
         std::cerr << "Error opening vectors.bin for writing." << std::endl;
     }
-    if (norm_out && bin_out) {
-        norm_out << d << "\n";
+    if (norm_out && bin_out && dim_out) {
+        dim_out << d << "\n";
         int index_of_vector = 0;
         for (const auto& pair : all_projected_vectors) {
             // Extract the base name (DRR111514) from the path
@@ -269,6 +270,7 @@ int main(int argc, char* argv[]) {
         }
         norm_out.close();
         bin_out.close();
+        dim_out.close();
     }
 
     // std::vector<std::pair<double, double>> jaccard_pairs;

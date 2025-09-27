@@ -12,8 +12,8 @@ import sys
 import tempfile
 import subprocess
 
-__version__ = "1.0.1"
-__date__ = "26/09/2025"
+__version__ = "1.0.2"
+__date__ = "27/09/2025"
 
 def index_vectors(output_dir):
     vectors = []
@@ -23,15 +23,15 @@ def index_vectors(output_dir):
         os.makedirs(output_dir)
     else:
         files = os.listdir(output_dir)
-        allowed = {"vectors.bin", "vector_norms.txt"}
+        allowed = {"vectors.bin", "vector_norms.txt", "dimension.txt"}
         for f in files:
             if f not in allowed:
                 os.remove(os.path.join(output_dir, f))
     
     output_index = os.path.join(output_dir, "faiss.index")
     input_bin_vectors = os.path.join(output_dir, "vectors.bin")
-    input_vector_names = os.path.join(output_dir, "vector_norms.txt")
-    f = open(input_vector_names)
+    dim_name = os.path.join(output_dir, "dimension.txt")
+    f = open(dim_name)
     dimension = int(f.readline().strip())
     f.close()
 
@@ -55,8 +55,9 @@ def index_vectors(output_dir):
 
 def search_index(index_folder, query_file, path_exec, j):
 
+    dimension_file = os.path.join(index_folder, "dimension.txt")
     vectors_name_file = os.path.join(index_folder, "vector_norms.txt")
-    with open(vectors_name_file, "r") as f:
+    with open(dimension_file, "r") as f:
         dimension = int(f.readline().strip())
 
     # Convert each query (hash list) into a random projected vector
@@ -143,7 +144,6 @@ def search_index(index_folder, query_file, path_exec, j):
     vectors_name_file = os.path.join(index_folder, "vector_norms.txt")
     vectors = {} #associates index -> (name, norm)
     with open(vectors_name_file, "r") as vec_nf:
-        next(vec_nf)  # Skip the first line (dimension)
         for idx, line in enumerate(vec_nf):
             if idx not in indices_to_recover:
                 continue
