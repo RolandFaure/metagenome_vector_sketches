@@ -8,10 +8,10 @@ TARGETS = jaccard standalone_projection
 all: $(TARGETS)
 
 jaccard: jaccard.cpp random_projection.cpp
-	$(CXX) $(CXXFLAGS) -o jaccard jaccard.cpp random_projection.cpp
+	$(CXX) $(CXXFLAGS) -Iinclude/Eigen -o jaccard jaccard.cpp random_projection.cpp
 
 standalone_projection: standalone_projection.cpp random_projection.cpp
-	$(CXX) $(CXXFLAGS) -o standalone_projection standalone_projection.cpp random_projection.cpp
+	$(CXX) $(CXXFLAGS) -Iinclude/Eigen -o standalone_projection standalone_projection.cpp random_projection.cpp
 
 clean:
 	rm -f $(TARGETS)

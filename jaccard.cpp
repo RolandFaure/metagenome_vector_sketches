@@ -230,7 +230,7 @@ int main(int argc, char* argv[]) {
             cout << "Processed " << sig_files[i] << ", hashes size " << hashes.size() << ", file number " << i << endl;
         }
     }
-
+ 
     // Move results to main vector
     all_projected_vectors = std::move(temp_projected_vectors);
 
