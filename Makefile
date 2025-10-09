@@ -1,14 +1,14 @@
-# Makefile for jaccard.cpp, standalone_projection.cpp, and optimized pairwise comparison
+# Makefile for project_everything.cpp, standalone_projection.cpp, and optimized pairwise comparison
 
 CXX = g++
 CXXFLAGS = -O3 -Wall -std=c++17 -I/usr/include/eigen3 -fopenmp -march=native -ffast-math
 
-TARGETS = jaccard standalone_projection pairwise_comp_optimized
+TARGETS = project_everything standalone_projection pairwise_comp_optimized
 
 all: $(TARGETS)
 
-jaccard: jaccard.cpp random_projection.cpp
-	$(CXX) $(CXXFLAGS) -Iinclude/Eigen -o jaccard jaccard.cpp random_projection.cpp
+project_everything: project_everything.cpp random_projection.cpp
+	$(CXX) $(CXXFLAGS) -Iinclude/Eigen -o project_everything project_everything.cpp random_projection.cpp
 
 standalone_projection: standalone_projection.cpp random_projection.cpp
 	$(CXX) $(CXXFLAGS) -Iinclude/Eigen -o standalone_projection standalone_projection.cpp random_projection.cpp

@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+
+#include "clipp.h"
     
 namespace fs = std::filesystem;
 using namespace Eigen;
@@ -27,7 +29,7 @@ MatrixXi load_matrix_block(const string& file_path, int dimension, int begin, in
         return MatrixXi();
     }
     
-    int vector_size = dimension * sizeof(int32_t);
+    uint64_t vector_size = dimension * sizeof(int32_t);
     file.seekg(begin * vector_size);
     
     int num_vectors = end - begin;
@@ -63,41 +65,80 @@ SparseResult compute_sparse_dot_products_optimized(
         local_cols.reserve(1000);
         local_values.reserve(1000);
         
-        #pragma omp for schedule(dynamic, 1)
-        for (int i = 0; i < block_i.cols(); ++i) {
-            
-            for (int j = 0; j < block_j.cols(); ++j) {
+        // // Aggressively optimized dot product computation for CPU (cache, SIMD, OpenMP)
+        // #pragma omp for schedule(dynamic, 4) collapse(1)
+        // for (int i = 0; i < block_i.cols(); ++i) {
+        //     const int* col_i = &block_i(0, i);
 
-                double threshold = 0.05 *  (norms_i(i) + norms_j(j)); // the norms are actually the norms *squared*
+        //     // Prefetch next column of block_i to L1 cache (if available)
+        //     if (i + 1 < block_i.cols()) {
+        //         __builtin_prefetch(&block_i(0, i + 1), 0, 1);
+        //     }
 
-                int64_t dot_product = 0;
-                
-                // Unrolled dot product computation for better performance
-                int k = 0;
-                const int* col_i = &block_i(0, i);
-                const int* col_j = &block_j(0, j);
+        //     for (int j = 0; j < block_j.cols(); ++j) {
+        //         const int* col_j = &block_j(0, j);
 
-                
-                // Process in chunks of 4 for better vectorization
-                for (; k <= block_i.rows() - 4; k += 4) {
-                    dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-                    dot_product += static_cast<int64_t>(col_i[k+1]) * col_j[k+1];
-                    dot_product += static_cast<int64_t>(col_i[k+2]) * col_j[k+2];
-                    dot_product += static_cast<int64_t>(col_i[k+3]) * col_j[k+3];
-                }
-                
-                // Handle remaining elements
-                for (; k < block_i.rows(); ++k) {
-                    dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-                }
-                
-                if (dot_product/dimension > threshold) { // /dimension because the vectors are actually stored multiplied by sqrt(dim)
+        //         // Prefetch next column of block_j to L1 cache (if available)
+        //         if (j + 1 < block_j.cols()) {
+        //             __builtin_prefetch(&block_j(0, j + 1), 0, 1);
+        //         }
+
+        //         double threshold = 0.05 * (norms_i(i) + norms_j(j)); // norms are squared
+
+        //         int64_t dot_product = 0;
+        //         int k = 0;
+
+        //         // SIMD-friendly loop: process in chunks of 8 (if possible)
+        //         #if defined(__AVX2__)
+        //             __m256i acc = _mm256_setzero_si256();
+        //         for (; k <= dimension - 8; k += 8) {
+        //             __m256i vi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_i[k]));
+        //             __m256i vj = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_j[k]));
+        //             __m256i prod = _mm256_mullo_epi32(vi, vj);
+        //             acc = _mm256_add_epi32(acc, prod);
+        //         }
+        //         // Horizontal sum of acc
+        //         alignas(32) int32_t tmp[8];
+        //         _mm256_store_si256(reinterpret_cast<__m256i*>(tmp), acc);
+        //         for (int t = 0; t < 8; ++t) dot_product += tmp[t];
+        //         #endif
+
+        //         // Fallback for remaining elements or non-AVX2
+        //         for (; k <= dimension - 4; k += 4) {
+        //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
+        //             dot_product += static_cast<int64_t>(col_i[k+1]) * col_j[k+1];
+        //             dot_product += static_cast<int64_t>(col_i[k+2]) * col_j[k+2];
+        //             dot_product += static_cast<int64_t>(col_i[k+3]) * col_j[k+3];
+        //         }
+        //         for (; k < dimension; ++k) {
+        //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
+        //         }
+
+        //         // Early exit if dot_product cannot reach threshold (optional, for sparse data)
+        //         // Not implemented here due to integer overflow risk
+
+        //         if (static_cast<double>(dot_product) / dimension > threshold) {
+        //             local_rows.push_back(i);
+        //             local_cols.push_back(j);
+        //             local_values.push_back(dot_product);
+        //         }
+        //     }
+        // }
+
+        MatrixXi dot_products = block_i.transpose() * block_j;
+        // Go through the solution and apply the threshold
+        for (int i = 0; i < dot_products.rows(); ++i) {
+            for (int j = 0; j < dot_products.cols(); ++j) {
+                double threshold = 0.05 * (norms_i(i) + norms_j(j));
+                int64_t dot_product = dot_products(i, j);
+                if (dot_product / dimension > threshold) {
                     local_rows.push_back(i);
                     local_cols.push_back(j);
                     local_values.push_back(dot_product);
                 }
             }
         }
+
 
         // Combine results from all threads
         #pragma omp critical
@@ -108,6 +149,88 @@ SparseResult compute_sparse_dot_products_optimized(
         }
     }
     
+    return result;
+}
+
+SparseResult compute_jaccard_with_MinHash(
+    const MatrixXi& block_i, 
+    const MatrixXi& block_j, 
+    int dimension){
+
+    SparseResult result;
+
+    #pragma omp parallel
+    {
+        vector<int> local_rows, local_cols;
+        vector<int64_t> local_values;
+        local_rows.reserve(1000);
+        local_cols.reserve(1000);
+        local_values.reserve(1000);
+
+        #pragma omp for schedule(dynamic, 1)
+        for (int i = 0; i < block_i.cols(); ++i) {
+            for (int j = 0; j < block_j.cols(); ++j) {
+                const int* col_i = &block_i(0, i);
+                const int* col_j = &block_j(0, j);
+
+                int intersection = 0, union_count = 0;
+
+                // Use simple loop, let compiler auto-vectorize
+
+                int idx_i = 0, idx_j = 0;
+                while (idx_i < dimension && idx_j < dimension) {
+                    int vi = col_i[idx_i];
+                    int vj = col_j[idx_j];
+                    if (vi == 0 && vj == 0) {
+                        ++idx_i;
+                        ++idx_j;
+                        continue;
+                    }
+                    if (vi == vj) {
+                        if (vi != 0) {
+                            ++intersection;
+                            ++union_count;
+                        }
+                        ++idx_i;
+                        ++idx_j;
+                    } else if (vi == 0 || (vj != 0 && vi > vj)) {
+                        ++union_count;
+                        ++idx_j;
+                    } else {
+                        ++union_count;
+                        ++idx_i;
+                    }
+                }
+                // Count remaining non-zero elements in either vector
+                while (idx_i < dimension) {
+                    if (col_i[idx_i] != 0) ++union_count;
+                    ++idx_i;
+                }
+                while (idx_j < dimension) {
+                    if (col_j[idx_j] != 0) ++union_count;
+                    ++idx_j;
+                }
+
+                if (union_count > 0) {
+                    double jaccard = static_cast<double>(intersection) / union_count;
+                    if (jaccard > 0.1) {
+                        local_rows.push_back(i);
+                        local_cols.push_back(j);
+                        // Store jaccard as int64_t scaled by 1e6 for precision
+                        local_values.push_back(static_cast<int64_t>(jaccard * 1e6));
+                    }
+                }
+            }
+        }
+
+        #pragma omp critical
+        {
+            result.rows.insert(result.rows.end(), local_rows.begin(), local_rows.end());
+            result.cols.insert(result.cols.end(), local_cols.begin(), local_cols.end());
+            result.values.insert(result.values.end(), local_values.begin(), local_values.end());
+        }
+    }
+
     return result;
 }
 
@@ -202,37 +325,35 @@ void write_sparse_results(const string& folder,
 }
 
 int main(int argc, char* argv[]) {
-    // Argument parsing using -- syntax
+    // Argument parsing using clipp
     string matrix_file;
     int dimension = 0;
     double max_memory_gb = 0.0;
     int num_threads = 1;
     string output_folder;
-
     int num_shards = 1;
     int shard_idx = 0;
+    int strategy = 0; // 0=random projections, 1=minHashes
 
-    for (int i = 1; i < argc; ++i) {
-        string arg = argv[i];
-        if (arg == "--vectors" && i + 1 < argc) {
-            matrix_file = argv[++i];
-        } else if (arg == "--dimension" && i + 1 < argc) {
-            dimension = stoi(argv[++i]);
-        } else if (arg == "--max_memory_gb" && i + 1 < argc) {
-            max_memory_gb = stod(argv[++i]);
-        } else if (arg == "--num_threads" && i + 1 < argc) {
-            num_threads = stoi(argv[++i]);
-        } else if (arg == "--output_folder" && i + 1 < argc) {
-            output_folder = argv[++i];
-        } else if (arg == "--num_shards" && i + 1 < argc) {
-            num_shards = stoi(argv[++i]);
-        } else if (arg == "--shard_idx" && i + 1 < argc) {
-            shard_idx = stoi(argv[++i]);
-        } else if (arg == "--help") {
-            cout << "Usage: " << argv[0]
-                 << " --vectors <file> --dimension <int> --max_memory_gb <float> --num_threads <int> --output_folder <folder> --num_shards <int> --shard_idx <int>" << endl;
-            return 0;
-        }
+    bool show_help = false;
+
+    auto cli = (
+        clipp::option("--vectors") & clipp::value("file", matrix_file),
+        clipp::option("--dimension") & clipp::value("int", dimension),
+        clipp::option("--max_memory_gb") & clipp::value("float", max_memory_gb),
+        clipp::option("--num_threads") & clipp::value("int", num_threads),
+        clipp::option("--output_folder") & clipp::value("folder", output_folder),
+        clipp::option("--num_shards") & clipp::value("int", num_shards),
+        clipp::option("--shard_idx") & clipp::value("int", shard_idx),
+        clipp::option("--strategy") & clipp::value("int", strategy),
+        clipp::option("--help").set(show_help)
+    );
+
+    if (!clipp::parse(argc, argv, cli) || show_help) {
+        cout << "Usage:\n"
+             << clipp::usage_lines(cli, argv[0]) << endl;
+        cout << "\n--strategy 0=random projections (default), 1=minHashes\n";
+        return show_help ? 0 : 1;
     }
 
     if (matrix_file.empty() || dimension <= 0 || max_memory_gb <= 0.0 || num_threads <= 0 || output_folder.empty() || num_shards <= 0 || shard_idx < 0 || shard_idx >= num_shards) {
@@ -246,11 +367,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    for (const auto& entry : fs::directory_iterator(output_folder)) {
-        if (entry.is_directory() && entry.path().filename().string().find("shard_") == 0) {
-            fs::remove_all(entry.path());
-        }
-    }
+    // for (const auto& entry : fs::directory_iterator(output_folder)) {
+    //     if (entry.is_directory() && entry.path().filename().string().find("shard_") == 0) {
+    //         fs::remove_all(entry.path());
+    //     }
+    // }
 
     omp_set_num_threads(num_threads);
 
@@ -316,7 +437,12 @@ int main(int argc, char* argv[]) {
                  << begin_j << ":" << end_j << ")" << endl;
 
             SparseResult result;
-            result = compute_sparse_dot_products_optimized(block_i, block_j, norms_i, norms_j, dimension);
+            if (strategy == 0){ //random projections
+                result = compute_sparse_dot_products_optimized(block_i, block_j, norms_i, norms_j, dimension);
+            }
+            else{ //minHashes
+                result = compute_jaccard_with_MinHash(block_i, block_j, dimension);
+            }
 
             // Add global offsets and store
             for (size_t k = 0; k < result.values.size(); ++k) {
@@ -327,6 +453,8 @@ int main(int argc, char* argv[]) {
                 );
             }
         }
+        cout << "qfklelmkqfsdj" << endl;
+        break;
     }
 
     auto end_time = chrono::high_resolution_clock::now();
