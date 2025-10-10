@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <regex>
 #include <unordered_set>
+#include <numeric>
 
 #include "clipp.h"
 
@@ -20,24 +21,17 @@ struct NeighborData {
     vector<int> neighbor_values;
 };
 
-// Global set to track folders where we decompressed files
-unordered_set<string> decompressed_folders;
-
 // Function to decompress zstd files if they exist and track them
 void decompress_zstd_files(const string& folder) {
     string cmd = "cd " + folder + " && zstd -f -d *.zst 2>/dev/null || true";
     system(cmd.c_str());
-    decompressed_folders.insert(folder);
 }
 
 // Function to clean up all decompressed files
-void cleanup_decompressed_files() {
-    for (const string& folder : decompressed_folders) {
-        // Remove decompressed .bin and .txt files, keeping only .zst files
-        string cmd = "cd " + folder + " && rm -f matrix.bin row_index.txt 2>/dev/null || true";
-        system(cmd.c_str());
-    }
-    decompressed_folders.clear();
+void cleanup_decompressed_files(const string& folder) {
+    // Remove decompressed .bin and .txt files, keeping only .zst files
+    string cmd = "cd " + folder + " && rm -f matrix.bin row_index.txt 2>/dev/null || true";
+    system(cmd.c_str());
 }
 
 // Load vector identifiers and create mapping from identifier to index
@@ -67,6 +61,29 @@ unordered_map<string, int> load_vector_identifiers(const string& matrix_folder, 
     }
     
     return id_to_index;
+}
+
+void load_vector_norms(const string& matrix_folder, vector<float>& norms){
+    string norms_file = matrix_folder + "/vector_norms.txt";
+    ifstream norms_in(norms_file);
+    if (!norms_in) {
+        cerr << "Error: Could not open " << norms_file << endl;
+        exit(1);
+    }
+    
+    string line;
+    int index = 0;
+    while (getline(norms_in, line)) {
+        if (line.empty()) continue;
+        
+        istringstream iss(line);
+        string identifier;
+        float norm;
+        if (iss >> identifier >> norm) {
+            norms.push_back(norm);
+            index++;
+        }
+    }
 }
 
 // Get the total number of vectors from vector_norms.txt
@@ -137,86 +154,121 @@ vector<pair<int, int64_t>> load_shard_row_index(const string& shard_folder) {
     return address_of_rows;
 }
 
-// Load neighbors for a specific row from its shard
-NeighborData load_neighbors_for_row(const string& matrix_folder, int query_row, 
-                                   int total_vectors, int num_shards) {
-    NeighborData result;
-    
-    // Determine which shard contains this row
-    int shard_idx = get_shard_for_row(query_row, total_vectors, num_shards);
-
-    cout << "will look in shard " << shard_idx << endl;
-    
-    string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
-    
-    // Decompress files in this shard if needed
-    decompress_zstd_files(shard_folder);
-    cout << "decompressed" << endl;
-    
-    // Load the row index for this shard
-    vector<pair<int, int64_t>> address_of_rows = load_shard_row_index(shard_folder);
-    if (address_of_rows.empty()) {
-        return result;
+/*
+ * Batch load neighbors for a set of rows.
+ * - rows: vector of row indices to query.
+ * - Returns: vector<NeighborData> in the same order as input rows.
+ * 
+ * This function batches queries by shard, decompresses each shard only once,
+ * loads all requested rows from that shard, and deletes the uncompressed files after use.
+ */
+vector<NeighborData> load_neighbors_for_rows(
+    const string& matrix_folder,
+    const vector<int>& rows,
+    int total_vectors,
+    int num_shards
+) {
+    // Map from shard index to vector of (input index, row)
+    unordered_map<int, vector<pair<size_t, int>>> shard_to_queries;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        int shard_idx = get_shard_for_row(rows[i], total_vectors, num_shards);
+        shard_to_queries[shard_idx].emplace_back(i, rows[i]);
     }
 
-    // Get file size to handle the last row
-    string bin_filename = shard_folder + "/matrix.bin";
-    ifstream bin_file(bin_filename, ios::binary);
-    if (!bin_file) {
-        cerr << "Error: Could not open " << bin_filename << endl;
-        return result;
-    }
-    bin_file.seekg(0, ios::end);
-    int64_t file_size = bin_file.tellg();
-    int64_t row_address ;
-    int number_of_neighbors = 0;
-    bool next = false;
-    bool found_neighbor = false;
-    for (pair<int,int64_t> address : address_of_rows){
-        if (next && !found_neighbor){
-            number_of_neighbors = (address.second - row_address) / 8;
-            cout << "next is " << address.second << endl;
-            found_neighbor = true;
+    vector<NeighborData> results(rows.size());
+
+    for (const auto& [shard_idx, queries] : shard_to_queries) {
+        string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
+
+        // Decompress files in this shard
+        decompress_zstd_files(shard_folder);
+
+        // Load the row index for this shard
+        vector<pair<int, int64_t>> address_of_rows = load_shard_row_index(shard_folder);
+        if (address_of_rows.empty()) {
+            // All queries in this shard will be empty
+            for (const auto& [out_idx, _] : queries) {
+                results[out_idx] = NeighborData{};
+            }
+            // Clean up and continue
+            cleanup_decompressed_files(shard_folder);
+            continue;
         }
-        if (address.first == query_row){
-            row_address = address.second;
-            next = true;
+
+        // Get file size to handle the last row
+        string bin_filename = shard_folder + "/matrix.bin";
+        ifstream bin_file_size(bin_filename, ios::binary);
+        if (!bin_file_size) {
+            cerr << "Error: Could not open " << bin_filename << endl;
+            for (const auto& [out_idx, _] : queries) {
+                results[out_idx] = NeighborData{};
+            }
+            cleanup_decompressed_files(shard_folder);
+            continue;
         }
+        bin_file_size.seekg(0, ios::end);
+        int64_t file_size = bin_file_size.tellg();
+        bin_file_size.close();
+
+        // Build a map from row to address index for fast lookup
+        unordered_map<int, size_t> row_to_addr_idx;
+        for (size_t i = 0; i < address_of_rows.size(); ++i) {
+            row_to_addr_idx[address_of_rows[i].first] = i;
+        }
+
+        for (const auto& [out_idx, query_row] : queries) {
+            NeighborData result;
+            auto it = row_to_addr_idx.find(query_row);
+            if (it == row_to_addr_idx.end()) {
+                results[out_idx] = result;
+                continue;
+            }
+            size_t addr_idx = it->second;
+            int64_t row_address = address_of_rows[addr_idx].second;
+            int number_of_neighbors = 0;
+            if (addr_idx + 1 < address_of_rows.size()) {
+                number_of_neighbors = (address_of_rows[addr_idx + 1].second - row_address) / 8;
+            } else {
+                number_of_neighbors = (file_size - row_address) / 8;
+            }
+            if (number_of_neighbors <= 0) {
+                results[out_idx] = result;
+                continue;
+            }
+            // Read the neighbor data
+            ifstream bin_file(bin_filename, ios::binary);
+            if (!bin_file) {
+                cerr << "Error: Could not open " << bin_filename << " for row " << query_row << endl;
+                results[out_idx] = result;
+                continue;
+            }
+            bin_file.seekg(row_address);
+
+            vector<int32_t> neighbor_differences(number_of_neighbors);
+            bin_file.read(reinterpret_cast<char*>(neighbor_differences.data()), number_of_neighbors * sizeof(int32_t));
+            vector<int32_t> neighbor_values(number_of_neighbors);
+            bin_file.read(reinterpret_cast<char*>(neighbor_values.data()), number_of_neighbors * sizeof(int32_t));
+            bin_file.read(reinterpret_cast<char*>(neighbor_values.data()), number_of_neighbors * sizeof(int32_t));
+
+            result.neighbor_indices.resize(number_of_neighbors);
+            result.neighbor_values.resize(number_of_neighbors);
+            
+            int current_col = 0;
+            for (int i = 0; i < number_of_neighbors; ++i) {
+                current_col += neighbor_differences[i];
+                result.neighbor_indices[i] = current_col;
+                result.neighbor_values[i] = neighbor_values[i];
+            }
+            results[out_idx] = std::move(result);
+        }
+
+        // Clean up decompressed files for this shard
+        cleanup_decompressed_files(shard_folder);
     }
-    if (next && !found_neighbor){
-        number_of_neighbors = (file_size - row_address) / 8;
-    }
-    
-    cout << "address is " << row_address << " with " << number_of_neighbors << " neighbors" << endl;
-    
-    // Read the neighbor data
-    bin_file.seekg(row_address);
-    
-    // Read neighbor column differences
-    vector<int32_t> neighbor_differences(number_of_neighbors);
-    for (int i = 0; i < number_of_neighbors; ++i) {
-        bin_file.read(reinterpret_cast<char*>(&neighbor_differences[i]), sizeof(int32_t));
-    }
-    
-    // Read neighbor values
-    vector<int32_t> neighbor_values(number_of_neighbors);
-    for (int i = 0; i < number_of_neighbors; ++i) {
-        bin_file.read(reinterpret_cast<char*>(&neighbor_values[i]), sizeof(int32_t));
-    }
-    
-    // Convert differences to actual indices
-    result.neighbor_indices.resize(number_of_neighbors);
-    result.neighbor_values.resize(number_of_neighbors);
-    
-    int current_col = 0;
-    for (int i = 0; i < number_of_neighbors; ++i) {
-        current_col += neighbor_differences[i];
-        result.neighbor_indices[i] = current_col;
-        result.neighbor_values[i] = neighbor_values[i];
-    }
-    
-    return result;
+
+    return results;
 }
+
 
 // Convert query string to index (supports both numeric indices and identifiers)
 int parse_query_to_index(const string& query_str, const unordered_map<string, int>& id_to_index) {
@@ -286,6 +338,107 @@ vector<int> read_queries_from_stdin(const unordered_map<string, int>& id_to_inde
     return queries;
 }
 
+vector<double> compute_closest_neighbor_distance(
+    const string& matrix_folder,
+    int total_vectors,
+    int num_shards,
+    vector<string> identifiers
+) {
+    vector<double> ratios(total_vectors, -1.0);
+
+    // Prepare all indices
+    vector<int> all_rows(total_vectors);
+    for (int i = 0; i < total_vectors; ++i) {
+        all_rows[i] = i;
+    }
+
+    // Batch load all neighbors in batches of one shard size
+    int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+
+    for (int batch_start = 0; batch_start < total_vectors; batch_start += rows_per_shard) {
+        int batch_end = min(batch_start + rows_per_shard, total_vectors);
+        vector<int> batch_rows;
+        for (int i = batch_start; i < batch_end; ++i) {
+            batch_rows.push_back(i);
+        }
+        vector<NeighborData> batch_neighbors = load_neighbors_for_rows(matrix_folder, batch_rows, total_vectors, num_shards);
+        for (size_t i = 0; i < batch_neighbors.size(); ++i) {
+            const NeighborData& nd = batch_neighbors[i];
+            if (nd.neighbor_values.size() < 2) {
+                ratios[batch_rows[i]] = -1.0;
+                continue;
+            }
+            vector<int> sorted_indices(nd.neighbor_values.size());
+            std::iota(sorted_indices.begin(), sorted_indices.end(), 0);
+            sort(sorted_indices.begin(), sorted_indices.end(), [&](int a, int b) {
+                return nd.neighbor_values[a] > nd.neighbor_values[b];
+            });
+            int best = nd.neighbor_values[sorted_indices[0]];
+            int second_best = nd.neighbor_values[sorted_indices[1]];
+            if (second_best != 0) {
+                ratios[batch_rows[i]] = second_best / static_cast<double>(best);
+            } else {
+                ratios[batch_rows[i]] = -1.0;
+            }
+            if (nd.neighbor_indices.size() >= 2) {
+                int idx1 = sorted_indices[0];
+                int idx2 = sorted_indices[1];
+                int neighbor1 = nd.neighbor_indices[idx1];
+                int neighbor2 = nd.neighbor_indices[idx2];
+                double ratio = (second_best != 0) ? (second_best / static_cast<double>(best)) : -1.0;
+                if (ratio != -1){
+                    ratios.push_back(ratio);
+                    for (auto _ = 0 ; _ < best ; _+=30){
+                        cout << ratio << " ";
+                    }
+                }
+            }
+        }
+        if (ratios.size() > 1000000){
+            cout << endl;
+            break;
+        }
+    }
+
+    return ratios;
+}
+
+unordered_map<int, vector<int>> get_neighbors_above_threshold(
+    const string& matrix_folder,
+    int total_vectors,
+    int num_shards,
+    vector<float> vector_norms,
+    double threshold = 0.3
+) {
+    unordered_map<int, vector<int>> index_to_neighbors;
+
+    // Process in batches per shard for efficiency
+    int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+    for (int batch_start = 0; batch_start < total_vectors; batch_start += rows_per_shard) {
+        int batch_end = min(batch_start + rows_per_shard, total_vectors);
+        vector<int> batch_rows;
+        for (int i = batch_start; i < batch_end; ++i) {
+            batch_rows.push_back(i);
+        }
+        vector<NeighborData> batch_neighbors = load_neighbors_for_rows(matrix_folder, batch_rows, total_vectors, num_shards);
+        for (size_t i = 0; i < batch_neighbors.size(); ++i) {
+            const NeighborData& nd = batch_neighbors[i];
+            vector<int> filtered_neighbors;
+            for (size_t j = 0; j < nd.neighbor_indices.size(); ++j) {
+                // Assuming neighbor_values are similarity scores as int, convert to double in [0,1]
+                double sim = static_cast<double>(nd.neighbor_values[j]) / vector_norms[batch_rows[i]] ;
+                if (sim > threshold) {
+                    filtered_neighbors.push_back(nd.neighbor_indices[j]);
+                }
+            }
+            if (!filtered_neighbors.empty()) {
+                index_to_neighbors[batch_rows[i]] = std::move(filtered_neighbors);
+            }
+        }
+    }
+    return index_to_neighbors;
+}
+
 int main(int argc, char* argv[]) {
     // Command line arguments
     string matrix_folder;
@@ -339,6 +492,9 @@ int main(int argc, char* argv[]) {
     // Load vector identifiers and create mapping
     vector<string> identifiers;
     unordered_map<string, int> id_to_index = load_vector_identifiers(matrix_folder, identifiers);
+
+    vector<float> vector_norms;
+    load_vector_norms(matrix_folder, vector_norms);
     
     int total_vectors = identifiers.size();
     if (total_vectors <= 0) {
@@ -353,7 +509,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
+    // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
+
+    auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
+    exit(0);
+
 
     // Determine queries
     vector<int> queries;
@@ -380,18 +540,20 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Process each query
-    for (int query_row : queries) {
+    // Query all at once using load_neighbors_for_rows
+    vector<NeighborData> all_neighbors = load_neighbors_for_rows(matrix_folder, queries, total_vectors, num_shards);
+
+    for (size_t q = 0; q < queries.size(); ++q) {
+        int query_row = queries[q];
         cout << "Query: " << query_row << " (" << identifiers[query_row] << ")" << endl;
-        
+
         if (query_row < 0 || query_row >= total_vectors) {
             cout << "  Error: Query row " << query_row << " is out of range [0, " << total_vectors << ")" << endl;
             continue;
         }
-        
-        NeighborData neighbors = load_neighbors_for_row(matrix_folder, query_row, 
-                                                       total_vectors, num_shards);
-        
+
+        const NeighborData& neighbors = all_neighbors[q];
+
         if (neighbors.neighbor_indices.empty()) {
             cout << "  No neighbors found" << endl;
         } else {
@@ -399,7 +561,7 @@ int main(int argc, char* argv[]) {
             for (size_t i = 0; i < neighbors.neighbor_indices.size(); ++i) {
                 int neighbor_idx = neighbors.neighbor_indices[i];
                 string neighbor_id = (neighbor_idx < total_vectors) ? identifiers[neighbor_idx] : "UNKNOWN";
-                if (neighbor_idx < 35000){
+                if (neighbor_idx < 35000) {
                     cout << "  " << neighbor_idx << " (" << neighbor_id << ") " << neighbors.neighbor_values[i] << endl;
                 }
             }
@@ -407,8 +569,6 @@ int main(int argc, char* argv[]) {
         cout << endl;
     }
 
-    // Clean up all decompressed files before exiting
-    cleanup_decompressed_files();
 
     return 0;
 }
