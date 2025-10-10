@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <immintrin.h>
     
 namespace fs = std::filesystem;
 using namespace Eigen;
@@ -27,9 +28,8 @@ MatrixXi load_matrix_block(const string& file_path, int dimension, int begin, in
         return MatrixXi();
     }
     
-    int vector_size = dimension * sizeof(int32_t);
+    uint64_t vector_size = dimension * sizeof(int32_t);
     file.seekg(begin * vector_size);
-    
     int num_vectors = end - begin;
     vector<int32_t> buffer(num_vectors * dimension);
     file.read(reinterpret_cast<char*>(buffer.data()), num_vectors * vector_size);
@@ -62,36 +62,17 @@ SparseResult compute_sparse_dot_products_optimized(
         local_rows.reserve(1000);
         local_cols.reserve(1000);
         local_values.reserve(1000);
-        
-        #pragma omp for schedule(dynamic, 1)
-        for (int i = 0; i < block_i.cols(); ++i) {
-            
-            for (int j = 0; j < block_j.cols(); ++j) {
 
-                double threshold = 0.05 *  (norms_i(i) + norms_j(j)); // the norms are actually the norms *squared*
+        // Instead of manual dot product, use Eigen for block multiplication
+        // Compute the dot product matrix
+        MatrixXi dot_products = block_i.transpose() * block_j;
 
-                int64_t dot_product = 0;
-                
-                // Unrolled dot product computation for better performance
-                int k = 0;
-                const int* col_i = &block_i(0, i);
-                const int* col_j = &block_j(0, j);
-
-                
-                // Process in chunks of 4 for better vectorization
-                for (; k <= block_i.rows() - 4; k += 4) {
-                    dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-                    dot_product += static_cast<int64_t>(col_i[k+1]) * col_j[k+1];
-                    dot_product += static_cast<int64_t>(col_i[k+2]) * col_j[k+2];
-                    dot_product += static_cast<int64_t>(col_i[k+3]) * col_j[k+3];
-                }
-                
-                // Handle remaining elements
-                for (; k < block_i.rows(); ++k) {
-                    dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-                }
-                
-                if (dot_product/dimension > threshold) { // /dimension because the vectors are actually stored multiplied by sqrt(dim)
+        // Go through the solution and apply the threshold
+        for (int i = 0; i < dot_products.rows(); ++i) {
+            for (int j = 0; j < dot_products.cols(); ++j) {
+                double threshold = 0.05 * (norms_i(i) + norms_j(j));
+                int64_t dot_product = dot_products(i, j);
+                if (dot_product / dimension > threshold) {
                     local_rows.push_back(i);
                     local_cols.push_back(j);
                     local_values.push_back(dot_product);
@@ -246,12 +227,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    for (const auto& entry : fs::directory_iterator(output_folder)) {
-        if (entry.is_directory() && entry.path().filename().string().find("shard_") == 0) {
-            fs::remove_all(entry.path());
-        }
-    }
-
     omp_set_num_threads(num_threads);
 
     vector<double> all_norms;
@@ -304,20 +279,30 @@ int main(int argc, char* argv[]) {
 
     for (int begin_i = begin_row; begin_i < end_row; begin_i += size_of_chunk) {
         int end_i = min(begin_i + size_of_chunk, end_row);
+
+        auto t_blocki_start = chrono::high_resolution_clock::now();
         MatrixXi block_i = load_matrix_block(matrix_file, dimension, begin_i, end_i);
         VectorXd norms_i = Map<VectorXd>(all_norms.data() + begin_i, end_i - begin_i);
 
+        auto t_blocki_end = chrono::high_resolution_clock::now();
+
         for (int begin_j = 0; begin_j < total_vectors; begin_j += size_of_chunk) {
             int end_j = min(begin_j + size_of_chunk, total_vectors);
+
+            auto t_blockj_start = chrono::high_resolution_clock::now();
             MatrixXi block_j = load_matrix_block(matrix_file, dimension, begin_j, end_j);
             VectorXd norms_j = Map<VectorXd>(all_norms.data() + begin_j, end_j - begin_j);
+            auto t_blockj_end = chrono::high_resolution_clock::now();
 
             cout << "Processing block (" << begin_i << ":" << end_i << ") x ("
-                 << begin_j << ":" << end_j << ")" << endl;
+                << begin_j << ":" << end_j << ")" << endl;
 
+            auto t_dot_start = chrono::high_resolution_clock::now();
             SparseResult result;
             result = compute_sparse_dot_products_optimized(block_i, block_j, norms_i, norms_j, dimension);
+            auto t_dot_end = chrono::high_resolution_clock::now();
 
+            auto t_store_start = chrono::high_resolution_clock::now();
             // Add global offsets and store
             for (size_t k = 0; k < result.values.size(); ++k) {
                 all_results.emplace_back(
@@ -326,6 +311,15 @@ int main(int argc, char* argv[]) {
                     result.values[k]
                 );
             }
+            auto t_store_end = chrono::high_resolution_clock::now();
+
+            auto blocki_ms = chrono::duration_cast<chrono::milliseconds>(t_blocki_end - t_blocki_start).count();
+            auto blockj_ms = chrono::duration_cast<chrono::milliseconds>(t_blockj_end - t_blockj_start).count();
+            auto dot_ms = chrono::duration_cast<chrono::milliseconds>(t_dot_end - t_dot_start).count();
+            auto store_ms = chrono::duration_cast<chrono::milliseconds>(t_store_end - t_store_start).count();
+
+            cout << "  Timing: block_i=" << blocki_ms << "ms, block_j=" << blockj_ms
+                 << "ms, dot=" << dot_ms << "ms, store=" << store_ms << "ms. Outputted " << result.rows.size() << " vecotrs " << endl;
         }
     }
 
