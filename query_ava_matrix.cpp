@@ -511,8 +511,8 @@ int main(int argc, char* argv[]) {
 
     // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
 
-    auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
-    exit(0);
+    // auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
+    // exit(0);
 
 
     // Determine queries
@@ -558,11 +558,37 @@ int main(int argc, char* argv[]) {
             cout << "  No neighbors found" << endl;
         } else {
             cout << "  Found " << neighbors.neighbor_indices.size() << " neighbors:" << endl;
+            // Pair each neighbor index with its value (intersection size)
+            vector<pair<int, int>> neighbor_pairs;
             for (size_t i = 0; i < neighbors.neighbor_indices.size(); ++i) {
-                int neighbor_idx = neighbors.neighbor_indices[i];
+                neighbor_pairs.emplace_back(neighbors.neighbor_indices[i], neighbors.neighbor_values[i]);
+            }
+
+            // Sort by Jaccard index (intersection / union) in descending order
+            // Jaccard = intersection / (|A| + |B| - intersection)
+            // |A| = vector_norms[query_row], |B| = vector_norms[neighbor_idx]
+            sort(neighbor_pairs.begin(), neighbor_pairs.end(), [&](const pair<int, int>& a, const pair<int, int>& b) {
+                int idx_a = a.first, idx_b = b.first;
+                float norm_a = vector_norms[query_row];
+                float norm_ba = vector_norms[idx_a];
+                float norm_bb = vector_norms[idx_b];
+                float inter_a = std::min({static_cast<float>(a.second), norm_a, norm_ba});
+                float inter_b = std::min({static_cast<float>(b.second), norm_a, norm_bb});
+                double jac_a = inter_a / (norm_a + norm_ba - inter_a);
+                double jac_b = inter_b / (norm_a + norm_bb - inter_b);
+                return jac_a > jac_b;
+            });
+
+            for (const auto& [neighbor_idx, intersection] : neighbor_pairs) {
                 string neighbor_id = (neighbor_idx < total_vectors) ? identifiers[neighbor_idx] : "UNKNOWN";
-                if (neighbor_idx < 35000) {
-                    cout << "  " << neighbor_idx << " (" << neighbor_id << ") " << neighbors.neighbor_values[i] << endl;
+                float norm_a = vector_norms[query_row];
+                float norm_b = vector_norms[neighbor_idx];
+                float corrected_intersection = std::min({norm_a, norm_b, static_cast<float>(intersection)});
+                double jaccard = corrected_intersection / (norm_a + norm_b - corrected_intersection);
+                // if (neighbor_idx == 34){
+                if (jaccard > 0.3 && neighbor_idx < 35000){
+                    cout << "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
+                        << " jaccard=" << jaccard  << " size of the datasets= " << vector_norms[neighbor_idx] << " " << vector_norms[query_row] << endl;
                 }
             }
         }
