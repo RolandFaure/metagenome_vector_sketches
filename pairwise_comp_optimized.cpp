@@ -8,8 +8,9 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
-//#include <immintrin.h>
 
+//#include <immintrin.h>
+#include "bits/include/elias_fano.hpp"
 #include "clipp.h"
     
 namespace fs = std::filesystem;
@@ -56,98 +57,98 @@ SparseResult compute_sparse_dot_products_optimized(
     
     SparseResult result;
     
-    #pragma omp parallel
-    {
-        // Thread-local storage
-        vector<int> local_rows, local_cols;
-        vector<int64_t> local_values;
-        local_rows.reserve(1000);
-        local_cols.reserve(1000);
-        local_values.reserve(1000);
-        
-        // // Aggressively optimized dot product computation for CPU (cache, SIMD, OpenMP)
-        // #pragma omp for schedule(dynamic, 4) collapse(1)
-        // for (int i = 0; i < block_i.cols(); ++i) {
-        //     const int* col_i = &block_i(0, i);
+    // #pragma omp parallel
+    // {
+    // Thread-local storage
+    vector<int> local_rows, local_cols;
+    vector<int64_t> local_values;
+    local_rows.reserve(1000);
+    local_cols.reserve(1000);
+    local_values.reserve(1000);
+    
+    // // Aggressively optimized dot product computation for CPU (cache, SIMD, OpenMP)
+    // #pragma omp for schedule(dynamic, 4) collapse(1)
+    // for (int i = 0; i < block_i.cols(); ++i) {
+    //     const int* col_i = &block_i(0, i);
 
-        //     // Prefetch next column of block_i to L1 cache (if available)
-        //     if (i + 1 < block_i.cols()) {
-        //         __builtin_prefetch(&block_i(0, i + 1), 0, 1);
-        //     }
+    //     // Prefetch next column of block_i to L1 cache (if available)
+    //     if (i + 1 < block_i.cols()) {
+    //         __builtin_prefetch(&block_i(0, i + 1), 0, 1);
+    //     }
 
-        //     for (int j = 0; j < block_j.cols(); ++j) {
-        //         const int* col_j = &block_j(0, j);
+    //     for (int j = 0; j < block_j.cols(); ++j) {
+    //         const int* col_j = &block_j(0, j);
 
-        //         // Prefetch next column of block_j to L1 cache (if available)
-        //         if (j + 1 < block_j.cols()) {
-        //             __builtin_prefetch(&block_j(0, j + 1), 0, 1);
-        //         }
+    //         // Prefetch next column of block_j to L1 cache (if available)
+    //         if (j + 1 < block_j.cols()) {
+    //             __builtin_prefetch(&block_j(0, j + 1), 0, 1);
+    //         }
 
-        //         double threshold = 0.05 * (norms_i(i) + norms_j(j)); // norms are squared
+    //         double threshold = 0.05 * (norms_i(i) + norms_j(j)); // norms are squared
 
-        //         int64_t dot_product = 0;
-        //         int k = 0;
+    //         int64_t dot_product = 0;
+    //         int k = 0;
 
-        //         // SIMD-friendly loop: process in chunks of 8 (if possible)
-        //         #if defined(__AVX2__)
-        //             __m256i acc = _mm256_setzero_si256();
-        //         for (; k <= dimension - 8; k += 8) {
-        //             __m256i vi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_i[k]));
-        //             __m256i vj = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_j[k]));
-        //             __m256i prod = _mm256_mullo_epi32(vi, vj);
-        //             acc = _mm256_add_epi32(acc, prod);
-        //         }
-        //         // Horizontal sum of acc
-        //         alignas(32) int32_t tmp[8];
-        //         _mm256_store_si256(reinterpret_cast<__m256i*>(tmp), acc);
-        //         for (int t = 0; t < 8; ++t) dot_product += tmp[t];
-        //         #endif
+    //         // SIMD-friendly loop: process in chunks of 8 (if possible)
+    //         #if defined(__AVX2__)
+    //             __m256i acc = _mm256_setzero_si256();
+    //         for (; k <= dimension - 8; k += 8) {
+    //             __m256i vi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_i[k]));
+    //             __m256i vj = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_j[k]));
+    //             __m256i prod = _mm256_mullo_epi32(vi, vj);
+    //             acc = _mm256_add_epi32(acc, prod);
+    //         }
+    //         // Horizontal sum of acc
+    //         alignas(32) int32_t tmp[8];
+    //         _mm256_store_si256(reinterpret_cast<__m256i*>(tmp), acc);
+    //         for (int t = 0; t < 8; ++t) dot_product += tmp[t];
+    //         #endif
 
-        //         // Fallback for remaining elements or non-AVX2
-        //         for (; k <= dimension - 4; k += 4) {
-        //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-        //             dot_product += static_cast<int64_t>(col_i[k+1]) * col_j[k+1];
-        //             dot_product += static_cast<int64_t>(col_i[k+2]) * col_j[k+2];
-        //             dot_product += static_cast<int64_t>(col_i[k+3]) * col_j[k+3];
-        //         }
-        //         for (; k < dimension; ++k) {
-        //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-        //         }
+    //         // Fallback for remaining elements or non-AVX2
+    //         for (; k <= dimension - 4; k += 4) {
+    //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
+    //             dot_product += static_cast<int64_t>(col_i[k+1]) * col_j[k+1];
+    //             dot_product += static_cast<int64_t>(col_i[k+2]) * col_j[k+2];
+    //             dot_product += static_cast<int64_t>(col_i[k+3]) * col_j[k+3];
+    //         }
+    //         for (; k < dimension; ++k) {
+    //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
+    //         }
 
-        //         // Early exit if dot_product cannot reach threshold (optional, for sparse data)
-        //         // Not implemented here due to integer overflow risk
+    //         // Early exit if dot_product cannot reach threshold (optional, for sparse data)
+    //         // Not implemented here due to integer overflow risk
 
-        //         if (static_cast<double>(dot_product) / dimension > threshold) {
-        //             local_rows.push_back(i);
-        //             local_cols.push_back(j);
-        //             local_values.push_back(dot_product);
-        //         }
-        //     }
-        // }
+    //         if (static_cast<double>(dot_product) / dimension > threshold) {
+    //             local_rows.push_back(i);
+    //             local_cols.push_back(j);
+    //             local_values.push_back(dot_product);
+    //         }
+    //     }
+    // }
 
-        MatrixXi dot_products = block_i.transpose() * block_j;
-        // Go through the solution and apply the threshold
-        for (int i = 0; i < dot_products.rows(); ++i) {
-            for (int j = 0; j < dot_products.cols(); ++j) {
-                double threshold = 0.05 * (norms_i(i) + norms_j(j));
-                int64_t dot_product = dot_products(i, j);
-                if (dot_product / dimension > threshold) {
-                    local_rows.push_back(i);
-                    local_cols.push_back(j);
-                    local_values.push_back(dot_product);
-                }
+    MatrixXi dot_products = block_i.transpose() * block_j;
+    // Go through the solution and apply the threshold
+    for (int i = 0; i < dot_products.rows(); ++i) {
+        for (int j = 0; j < dot_products.cols(); ++j) {
+            double threshold = 0.05 * (norms_i(i) + norms_j(j));
+            int64_t dot_product = dot_products(i, j);
+            if (dot_product / dimension > threshold) {
+                local_rows.push_back(i);
+                local_cols.push_back(j);
+                local_values.push_back(dot_product);
             }
         }
+    }
 
 
         // Combine results from all threads
-        #pragma omp critical
-        {
-            result.rows.insert(result.rows.end(), local_rows.begin(), local_rows.end());
-            result.cols.insert(result.cols.end(), local_cols.begin(), local_cols.end());
-            result.values.insert(result.values.end(), local_values.begin(), local_values.end());
-        }
-    }
+        // #pragma omp critical
+        // {
+    result.rows.insert(result.rows.end(), local_rows.begin(), local_rows.end());
+    result.cols.insert(result.cols.end(), local_cols.begin(), local_cols.end());
+    result.values.insert(result.values.end(), local_values.begin(), local_values.end());
+        // }
+    // }
     
     return result;
 }
@@ -265,6 +266,65 @@ VectorXd compute_norms_squared(const MatrixXi& matrix) {
 }
 
 // Write sparse results to file (simple format)
+void write_sparse_results_prev(const string& folder, 
+                         const vector<tuple<int, int, int64_t>>& results,
+                         int dimension) {
+
+    // Remove existing output folder if it exists, then create it
+    if (!fs::exists(folder)) {
+        fs::create_directories(folder);
+    }
+
+    unordered_map<int, std::pair<vector<int>,vector<int64_t>>> reorganized_results;
+    for (const auto& [row, col, value] : results) {
+        reorganized_results[row].first.push_back(col);
+        reorganized_results[row].second.push_back(value);
+    }
+
+    // Write binary output: int32, vector<int32>, vector<int32>(number_of_cols, vector:diff_of_cols_with_previous_col, vector:values/2048)
+    string bin_filename = folder + "matrix.bin";
+    ofstream bin_out(bin_filename, ios::binary);
+
+    // File to store the position of the first byte for each row
+    string index_filename = folder + "row_index.txt";
+    ofstream index_out(index_filename);
+
+    // Map from row to first byte position in the binary file
+    int64_t current_pos = 0;
+
+    // Write each row's results in the new format, iterating only over rows present in reorganized_results
+    for (const auto& [row, pair] : reorganized_results) {
+        //NOTE: Assumes #genomes can be read in int32_t
+        const vector<int32_t>& cols = pair.first;
+        const vector<int64_t>& vals = pair.second;
+
+        // Record the first position for this row
+        index_out << row << " " << current_pos << endl;
+
+        // Write column indices as differences (deltas) from previous col
+        // int32_t prev_col = 0;
+        // for (size_t k = 1; k < cols.size(); ++k) {
+            // int32_t delta_col = cols[k] - prev_col;
+            // prev_col = cols[k];
+            // bin_out.write(reinterpret_cast<const char*>(&delta_col), sizeof(int32_t));
+            // current_pos += sizeof(int32_t);
+        // }
+
+        // Write values (divided by 2048)
+        for (size_t k = 0; k < vals.size(); ++k) {
+            int32_t val32 = static_cast<int32_t>(round(static_cast<double>(vals[k]) / dimension));
+            bin_out.write(reinterpret_cast<const char*>(&val32), sizeof(int32_t));
+            current_pos += sizeof(int32_t);
+        }
+    }
+
+    // Compress the output files using zstd and remove the originals
+    string cmd1 = "zstd -f " + bin_filename + " && rm -f " + bin_filename;
+    string cmd2 = "zstd -f " + index_filename + " && rm -f " + index_filename;
+    system(cmd1.c_str());
+    system(cmd2.c_str());
+}
+
 void write_sparse_results(const string& folder, 
                          const vector<tuple<int, int, int64_t>>& results,
                          int dimension) {
@@ -293,21 +353,25 @@ void write_sparse_results(const string& folder,
 
     // Write each row's results in the new format, iterating only over rows present in reorganized_results
     for (const auto& [row, pair] : reorganized_results) {
-        const vector<int>& cols = pair.first;
+        //NOTE: Assumes #genomes can be read in int32_t
+        const vector<int32_t>& cols = pair.first;
         const vector<int64_t>& vals = pair.second;
-        int32_t num_cols = static_cast<int32_t>(cols.size());
 
         // Record the first position for this row
         index_out << row << " " << current_pos << endl;
+        bits::elias_fano<> ef;
+        ef.encode(cols.begin(), cols.size(), cols.back()+1);
+        ef.save(bin_out);
+        current_pos += ef.num_bytes();
 
         // Write column indices as differences (deltas) from previous col
-        int32_t prev_col = 0;
-        for (size_t k = 0; k < cols.size(); ++k) {
-            int32_t delta_col = cols[k] - prev_col;
-            prev_col = cols[k];
-            bin_out.write(reinterpret_cast<const char*>(&delta_col), sizeof(int32_t));
-            current_pos += sizeof(int32_t);
-        }
+        // int32_t prev_col = 0;
+        // for (size_t k = 1; k < cols.size(); ++k) {
+            // int32_t delta_col = cols[k] - prev_col;
+            // prev_col = cols[k];
+            // bin_out.write(reinterpret_cast<const char*>(&delta_col), sizeof(int32_t));
+            // current_pos += sizeof(int32_t);
+        // }
 
         // Write values (divided by 2048)
         for (size_t k = 0; k < vals.size(); ++k) {
