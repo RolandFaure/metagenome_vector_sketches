@@ -72,7 +72,6 @@ void load_vector_norms(const string& matrix_folder, vector<float>& norms){
     }
     
     string line;
-    int index = 0;
     while (getline(norms_in, line)) {
         if (line.empty()) continue;
         
@@ -81,7 +80,6 @@ void load_vector_norms(const string& matrix_folder, vector<float>& norms){
         float norm;
         if (iss >> identifier >> norm) {
             norms.push_back(norm);
-            index++;
         }
     }
 }
@@ -225,6 +223,7 @@ vector<NeighborData> load_neighbors_for_rows(
             }
             size_t addr_idx = it->second;
             int64_t row_address = address_of_rows[addr_idx].second;
+
             int number_of_neighbors = 0;
             if (addr_idx + 1 < address_of_rows.size()) {
                 number_of_neighbors = (address_of_rows[addr_idx + 1].second - row_address) / 8;
@@ -248,7 +247,6 @@ vector<NeighborData> load_neighbors_for_rows(
             bin_file.read(reinterpret_cast<char*>(neighbor_differences.data()), number_of_neighbors * sizeof(int32_t));
             vector<int32_t> neighbor_values(number_of_neighbors);
             bin_file.read(reinterpret_cast<char*>(neighbor_values.data()), number_of_neighbors * sizeof(int32_t));
-            bin_file.read(reinterpret_cast<char*>(neighbor_values.data()), number_of_neighbors * sizeof(int32_t));
 
             result.neighbor_indices.resize(number_of_neighbors);
             result.neighbor_values.resize(number_of_neighbors);
@@ -260,6 +258,7 @@ vector<NeighborData> load_neighbors_for_rows(
                 result.neighbor_values[i] = neighbor_values[i];
             }
             results[out_idx] = std::move(result);
+
         }
 
         // Clean up decompressed files for this shard
@@ -440,6 +439,7 @@ unordered_map<int, vector<int>> get_neighbors_above_threshold(
 }
 
 int main(int argc, char* argv[]) {
+
     // Command line arguments
     string matrix_folder;
     string query_file;
@@ -504,6 +504,8 @@ int main(int argc, char* argv[]) {
 
     // Discover number of shards
     int num_shards = discover_shards(matrix_folder);
+    // num_shards = 100;
+    // cout << "DEBUG NUM SHASS" << endl;
     if (num_shards <= 0) {
         cerr << "Error: No shard folders found in " << matrix_folder << endl;
         return 1;
@@ -569,11 +571,11 @@ int main(int argc, char* argv[]) {
             // |A| = vector_norms[query_row], |B| = vector_norms[neighbor_idx]
             sort(neighbor_pairs.begin(), neighbor_pairs.end(), [&](const pair<int, int>& a, const pair<int, int>& b) {
                 int idx_a = a.first, idx_b = b.first;
-                float norm_a = vector_norms[query_row];
-                float norm_ba = vector_norms[idx_a];
-                float norm_bb = vector_norms[idx_b];
-                float inter_a = std::min({static_cast<float>(a.second), norm_a, norm_ba});
-                float inter_b = std::min({static_cast<float>(b.second), norm_a, norm_bb});
+                float norm_a = vector_norms[query_row]*vector_norms[query_row];
+                float norm_ba = vector_norms[idx_a]*vector_norms[idx_a];
+                float norm_bb = vector_norms[idx_b]*vector_norms[idx_b];
+                float inter_a = a.second;
+                float inter_b = b.second;
                 double jac_a = inter_a / (norm_a + norm_ba - inter_a);
                 double jac_b = inter_b / (norm_a + norm_bb - inter_b);
                 return jac_a > jac_b;
@@ -581,14 +583,13 @@ int main(int argc, char* argv[]) {
 
             for (const auto& [neighbor_idx, intersection] : neighbor_pairs) {
                 string neighbor_id = (neighbor_idx < total_vectors) ? identifiers[neighbor_idx] : "UNKNOWN";
-                float norm_a = vector_norms[query_row];
-                float norm_b = vector_norms[neighbor_idx];
-                float corrected_intersection = std::min({norm_a, norm_b, static_cast<float>(intersection)});
-                double jaccard = corrected_intersection / (norm_a + norm_b - corrected_intersection);
+                float norm_a = vector_norms[query_row]*vector_norms[query_row];
+                float norm_b = vector_norms[neighbor_idx]*vector_norms[neighbor_idx];
+                double jaccard = intersection / (norm_a + norm_b - intersection);
                 // if (neighbor_idx == 34){
-                if (jaccard > 0.3 && neighbor_idx < 35000){
+                if (jaccard > 0.1 && neighbor_idx < 35000){
                     cout << "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
-                        << " jaccard=" << jaccard  << " size of the datasets= " << vector_norms[neighbor_idx] << " " << vector_norms[query_row] << endl;
+                        << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
                 }
             }
         }
