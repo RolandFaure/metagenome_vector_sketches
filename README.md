@@ -15,7 +15,10 @@ conda install -c conda-forge pybind11 scipy matplotlib
 cd metagenome_vector_sketches
 mkdir build
 cd build
-cmake -DPYTHON_EXECUTABLE=$(which python) ..
+cmake -DPython_EXECUTABLE=$(which python) \
+      -DPython_ROOT_DIR=$CONDA_PREFIX \
+      -DPython_FIND_STRATEGY=LOCATION \
+      ..
 cmake --build . -j 8
 ```
 

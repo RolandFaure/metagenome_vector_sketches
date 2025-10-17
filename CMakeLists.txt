@@ -25,9 +25,9 @@ else()
     message(WARNING "Eigen not found in standard paths; please set EIGEN_INCLUDE_DIR manually")
 endif()
 
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
 # ==== Bits library ====
-# Assuming your bits submodule is located at: ${CMAKE_SOURCE_DIR}/bits
-# and that it has its own CMakeLists.txt that defines a target called `BITS`
 add_subdirectory(bits)
 
 # ==== Executables ====
@@ -35,25 +35,28 @@ add_executable(project_everything
     src/project_everything.cpp
     src/random_projection.cpp
 )
+target_include_directories(project_everything PRIVATE ${EIGEN_INCLUDE_DIR})
 
 add_executable(standalone_projection
     src/standalone_projection.cpp
     src/random_projection.cpp
 )
+target_include_directories(standalone_projection PRIVATE ${EIGEN_INCLUDE_DIR})
 
 add_executable(pairwise_comp_optimized
     src/pairwise_comp_optimized.cpp
 )
+target_include_directories(pairwise_comp_optimized PRIVATE ${EIGEN_INCLUDE_DIR})
 
 add_executable(query_ava_matrix
     src/query_ava_matrix.cpp
 )
-
-# ==== Include directories ====
-target_include_directories(project_everything PRIVATE ${EIGEN_INCLUDE_DIR})
-target_include_directories(standalone_projection PRIVATE ${EIGEN_INCLUDE_DIR})
-target_include_directories(pairwise_comp_optimized PRIVATE ${EIGEN_INCLUDE_DIR})
 target_include_directories(query_ava_matrix PRIVATE ${EIGEN_INCLUDE_DIR})
+
+add_library(pc_mat_lib STATIC src/read_pc_mat.cpp)
+set_target_properties(pc_mat_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(pc_mat_lib PUBLIC include)
+
 
 # ==== Link libraries ====
 # Only pairwise_comp_optimized depends on the BITS library
@@ -71,7 +74,8 @@ find_package(Python COMPONENTS Interpreter Development REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)  # prefer installed pybind11 config
 # If the above fails, install pybind11 or use the pybind11 header-only fallback.
 
-pybind11_add_module(read_pc_mat_module src/read_pc_mat.cpp)
+pybind11_add_module(read_pc_mat_module src/bindings.cpp)
+target_link_libraries(read_pc_mat_module PRIVATE pc_mat_lib)
 
 set_target_properties(read_pc_mat_module PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src
