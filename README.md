@@ -49,7 +49,7 @@ Use the vectors to create pairwise matrix:
 Then, to query using the AVA matrix:
 
 ``` shell
-../build/query_ava_matrix --matrix_folder toy_index/ --query_ids 10
+../build/query_ava_matrix --matrix_folder toy_index/ --query_file query_ids.txt
 ```
 
 To use python interface:

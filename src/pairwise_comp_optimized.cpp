@@ -300,7 +300,7 @@ void write_sparse_results_prev(const string& folder,
 
         // Record the first position for this row
         index_out << row << " " << current_pos <<std::endl;
-        std::cout<<row<<" col size: "<<cols.size()<<" val size: "<<vals.size()<< endl;
+        // std::cout<<row<<" col size: "<<cols.size()<<" val size: "<<vals.size()<< endl;
 
         // Write column indices as differences (deltas) from previous col
         // int32_t prev_col = 0;
@@ -380,22 +380,22 @@ void write_sparse_results(const string& folder,
         row_vec[indx] = row;
         curr_pos_vec[indx++] = current_pos;
 
-        std::cout<<indx<<": Writing row: "<< row <<" at pos: "<< current_pos << std::endl;
+        // std::cout<<indx<<": Writing row: "<< row <<" at pos: "<< current_pos << std::endl;
         
         bits::elias_fano<> ef;
         ef.encode(cols.begin(), cols.size(), cols.back()+1);
         ef.save(bin_out);
         current_pos += ef.num_bytes();
 
-        std::cout<<"ef bytes: "<< ef.num_bytes() << std::endl;
-        std::cout<<"col size: "<<cols.size()<<" val size: "<<vals.size()<<std::endl;
+        // std::cout<<"ef bytes: "<< ef.num_bytes() << std::endl;
+        // std::cout<<"col size: "<<cols.size()<<" val size: "<<vals.size()<<std::endl;
 
         vector<int64_t> dot_products_vec = get_dot_products_vec(vals);
         bits::compact_vector cv;
         cv.build(dot_products_vec.begin(), dot_products_vec.size());
         cv.save(bin_out);
         current_pos += cv.num_bytes();
-        std::cout<<" cv bytes: "<< cv.num_bytes() << std::endl;
+        // std::cout<<" cv bytes: "<< cv.num_bytes() << std::endl;
     }
     bin_out.close();
     bits::compact_vector cv_rows;

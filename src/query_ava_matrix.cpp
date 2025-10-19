@@ -224,8 +224,8 @@ vector<NeighborData> load_neighbors_for_rows(
             size_t addr_idx = it->second;
             int64_t row_address = address_of_rows[addr_idx].second;
 
-            std::cout<<"addr_idx: "<< addr_idx <<" query_row: "<< query_row
-                    <<" row_address: "<< row_address << std::endl;
+            // std::cout<<"addr_idx: "<< addr_idx <<" query_row: "<< query_row
+            //         <<" row_address: "<< row_address << std::endl;
 
             int number_of_neighbors = 0;
             if (addr_idx + 1 < address_of_rows.size()) {
@@ -237,7 +237,7 @@ vector<NeighborData> load_neighbors_for_rows(
                 results[out_idx] = result;
                 continue;
             }
-            std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
+            // std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
             // Read the neighbor data
             ifstream bin_file(bin_filename, ios::binary);
             if (!bin_file) {

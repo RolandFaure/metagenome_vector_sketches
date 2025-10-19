@@ -205,8 +205,8 @@ namespace pc_mat {
                 }
                 size_t addr_idx = it->second;
                 int64_t row_address = address_of_rows[addr_idx].second;
-                std::cout<<"addr_idx: "<< addr_idx <<" query_row: "<< query_row
-                    <<" row_address: "<< row_address << std::endl;
+                // std::cout<<"addr_idx: "<< addr_idx <<" query_row: "<< query_row
+                //     <<" row_address: "<< row_address << std::endl;
 
                 
                 // if (addr_idx + 1 < address_of_rows.size()) {
@@ -229,13 +229,13 @@ namespace pc_mat {
 
                 bits::elias_fano<> ef;
                 ef.load(bin_file);
-                std::cout<<"ef num bytes: "<< ef.num_bytes() << std::endl;
+                // std::cout<<"ef num bytes: "<< ef.num_bytes() << std::endl;
                 bits::compact_vector cv;
                 cv.load(bin_file);
-                std::cout<<"cv num bytes: "<< cv.num_bytes() << std::endl;
+                // std::cout<<"cv num bytes: "<< cv.num_bytes() << std::endl;
 
                 int number_of_neighbors = ef.size();
-                std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
+                // std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
                 
                 result.neighbor_indices.resize(number_of_neighbors);
                 result.neighbor_values.resize(number_of_neighbors);
@@ -511,7 +511,7 @@ namespace pc_mat {
             if (neighbors.neighbor_indices.empty()) {
                 // cout << "  No neighbors found" << endl;
             } else {
-                cout << "  Found " << neighbors.neighbor_indices.size() << " neighbors:" << endl;
+                // cout << "  Found " << neighbors.neighbor_indices.size() << " neighbors:" << endl;
                 // Pair each neighbor index with its value (intersection size)
                 vector<pair<int, int>> neighbor_pairs;
                 for (size_t i = 0; i < neighbors.neighbor_indices.size(); ++i) {
@@ -544,8 +544,8 @@ namespace pc_mat {
                     res.jaccard_similarities.push_back(jaccard);
                     // if (neighbor_idx == 34){
                     // if (jaccard > 0.1 && neighbor_idx < 35000){
-                        cout << "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
-                            << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
+                        // cout << "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
+                        //     << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
                     // }
                 }
                 all_results[q] = std::move(res);
