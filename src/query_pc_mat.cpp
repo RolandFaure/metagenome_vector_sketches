@@ -43,12 +43,12 @@ int main(int argc, char* argv[]) {
 
     for(int i=0; i< all_results.size(); i++){
         const pc_mat::Result& res = all_results[i];
-        cout << "Query: " << res.self_id << endl;
+        std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
         for (size_t j = 0; j < res.neighbor_ids.size(); ++j) {
-            cout << "  Neighbor: " << res.neighbor_ids[j]
+            std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
                  << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
         }
-        cout << endl;
+        std::cout << std::endl;
     }
     return 0;
 }

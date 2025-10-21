@@ -46,10 +46,13 @@ Use the vectors to create pairwise matrix:
 ../build/pairwise_comp_optimized --vectors toy_index/vectors.bin --dimension 1024 --output_folder toy_index/ --max_memory_gb 12 --num_threads 8
 ```
 
-Then, to query using the AVA matrix:
+Then, to query using `query_pc_mat`:
 
-``` shell
+<!-- ``` shell
 ../build/query_ava_matrix --matrix_folder toy_index/ --query_file query_ids.txt
+``` -->
+``` shell
+../build/query_pc_mat --matrix_folder toy_index/ --query_file query_ids.txt
 ```
 
 To use python interface:

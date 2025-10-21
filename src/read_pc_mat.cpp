@@ -543,7 +543,7 @@ namespace pc_mat {
                 }
                 all_results[q] = std::move(res);
             }
-            cout << endl;
+            // cout << endl;
         }
         return all_results;
     }
