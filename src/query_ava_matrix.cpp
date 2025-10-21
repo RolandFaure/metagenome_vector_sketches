@@ -224,6 +224,9 @@ vector<NeighborData> load_neighbors_for_rows(
             size_t addr_idx = it->second;
             int64_t row_address = address_of_rows[addr_idx].second;
 
+            // std::cout<<"addr_idx: "<< addr_idx <<" query_row: "<< query_row
+            //         <<" row_address: "<< row_address << std::endl;
+
             int number_of_neighbors = 0;
             if (addr_idx + 1 < address_of_rows.size()) {
                 number_of_neighbors = (address_of_rows[addr_idx + 1].second - row_address) / 8;
@@ -234,6 +237,7 @@ vector<NeighborData> load_neighbors_for_rows(
                 results[out_idx] = result;
                 continue;
             }
+            // std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
             // Read the neighbor data
             ifstream bin_file(bin_filename, ios::binary);
             if (!bin_file) {
@@ -497,6 +501,7 @@ int main(int argc, char* argv[]) {
     load_vector_norms(matrix_folder, vector_norms);
     
     int total_vectors = identifiers.size();
+    std::cout<<"Total vectors loaded: " << total_vectors << endl;
     if (total_vectors <= 0) {
         cerr << "Error: Could not determine total number of vectors" << endl;
         return 1;
@@ -587,10 +592,10 @@ int main(int argc, char* argv[]) {
                 float norm_b = vector_norms[neighbor_idx]*vector_norms[neighbor_idx];
                 double jaccard = intersection / (norm_a + norm_b - intersection);
                 // if (neighbor_idx == 34){
-                if (jaccard > 0.1 && neighbor_idx < 35000){
+                // if (jaccard > 0.1 && neighbor_idx < 35000){
                     cout << "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
                         << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
-                }
+                // }
             }
         }
         cout << endl;

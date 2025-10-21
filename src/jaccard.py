@@ -333,7 +333,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     parser_index = subparsers.add_parser("index", help="Index vectors from a file.")
-    parser_index.add_argument("output_index", type=str, help="Path to output FAISS index folder.")
+    parser_index.add_argument("output_index", type=str, help="Path to output FAISS index folder [same folder contains the vectors].")
     parser_index.add_argument("-t", "--threads", type=int, default=1, help="Number of threads [1]")
 
     parser_search = subparsers.add_parser("search", help="Search vectors in a FAISS index.")
