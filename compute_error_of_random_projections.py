@@ -88,3 +88,6 @@ def plot_error_minhash():
 
     #binomial of parameter J 
     ...
+
+if __name__ == "__main__":
+    plot_error_random_proj()
