@@ -38,13 +38,18 @@ int main(int argc, char* argv[]) {
         cout << "  echo -e \"SRR123456\\n25\\nSRR789012\" | " << argv[0] << " --matrix_folder ./results --stdin\n";
         return show_help ? 0 : 1;
     }
-
+    auto start = std::chrono::high_resolution_clock::now();
     vector<pc_mat::Result> all_results = pc_mat::query(matrix_folder, query_file);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+    std::cout << "Query completed in " << elapsed.count() << " seconds.\n" << std::endl;
 
     for(int i=0; i< all_results.size(); i++){
         const pc_mat::Result& res = all_results[i];
         std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
-        for (size_t j = 0; j < res.neighbor_ids.size(); ++j) {
+        int64_t num_neighbors_to_show = std::min<int64_t>(10, res.neighbor_ids.size());
+        std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
+        for (size_t j = 0; j < num_neighbors_to_show; ++j) {
             std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
                  << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
         }

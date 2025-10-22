@@ -31,7 +31,7 @@ Create projected vectors from fracminhash data into the index folder:
 
 ```shell
 cd test/
-../build/project_everything toy toy_index/ -t 8 -d 1024 -s 0
+../build/project_everything toy toy_index/ -t 8 -d 2048 -s 0
 ```
 
 Use the vectors to create FAISS index:
@@ -43,21 +43,21 @@ python3 ../src/jaccard.py index toy_index -t 8
 Use the vectors to create pairwise matrix:
 
 ``` shell
-../build/pairwise_comp_optimized --vectors toy_index/vectors.bin --dimension 1024 --output_folder toy_index/ --max_memory_gb 12 --num_threads 8
+../build/pairwise_comp_optimized --vectors toy_index/vectors.bin --dimension 2048 --output_folder toy_index/ --max_memory_gb 12 --num_threads 8
 ```
 
 Then, to query using `query_pc_mat`:
 
 <!-- ``` shell
-../build/query_ava_matrix --matrix_folder toy_index/ --query_file query_ids.txt
+../build/query_ava_matrix --matrix_folder toy_index/ --query_file query_strs.txt
 ``` -->
 ``` shell
-../build/query_pc_mat --matrix_folder toy_index/ --query_file query_ids.txt
+../build/query_pc_mat --matrix_folder toy_index/ --query_file query_strs.txt
 ```
 
 To use python interface:
 
 ```shell
-python3 ../src/read_pc_mat.py toy_index query_ids.txt
+python3 ../src/read_pc_mat.py toy_index query_strs.txt
 
 ```

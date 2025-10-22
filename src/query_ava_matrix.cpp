@@ -585,7 +585,7 @@ int main(int argc, char* argv[]) {
                 double jac_b = inter_b / (norm_a + norm_bb - inter_b);
                 return jac_a > jac_b;
             });
-
+            int neighbor_count = 0;
             for (const auto& [neighbor_idx, intersection] : neighbor_pairs) {
                 string neighbor_id = (neighbor_idx < total_vectors) ? identifiers[neighbor_idx] : "UNKNOWN";
                 float norm_a = vector_norms[query_row]*vector_norms[query_row];
@@ -593,8 +593,12 @@ int main(int argc, char* argv[]) {
                 double jaccard = intersection / (norm_a + norm_b - intersection);
                 // if (neighbor_idx == 34){
                 // if (jaccard > 0.1 && neighbor_idx < 35000){
-                    cout << "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
-                        << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
+                cout << "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
+                    << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
+                neighbor_count++;
+                if (neighbor_count >= 10){
+                    break;
+                }
                 // }
             }
         }
