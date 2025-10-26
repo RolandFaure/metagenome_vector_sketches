@@ -46,6 +46,8 @@ Use the vectors to create pairwise matrix:
 ../build/pairwise_comp_optimized --vectors toy_index/vectors.bin --dimension 2048 --output_folder toy_index/ --max_memory_gb 12 --num_threads 8
 ```
 
+../build/pairwise_comp_optimized --vectors toy_index_rice/vectors.bin --dimension 2048 --output_folder toy_index_rice/ --max_memory_gb 12 --num_threads 8
+
 Then, to query using `query_pc_mat`:
 
 <!-- ``` shell
@@ -53,6 +55,10 @@ Then, to query using `query_pc_mat`:
 ``` -->
 ``` shell
 ../build/query_pc_mat --matrix_folder toy_index/ --query_file query_strs.txt
+```
+
+``` shell
+../build/query_pc_mat --matrix_folder toy_index_rice/ --query_file query_strs.txt
 ```
 
 To use python interface:

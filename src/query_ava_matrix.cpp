@@ -145,6 +145,7 @@ vector<pair<int, int64_t>> load_shard_row_index(const string& shard_folder) {
         int row;
         int64_t address;
         if (iss >> row >> address) {
+            // std::cout<<"Loaded row index "<< row <<" address: "<< address << std::endl;
             address_of_rows.push_back({row, address});
         }
     }
@@ -260,6 +261,8 @@ vector<NeighborData> load_neighbors_for_rows(
                 current_col += neighbor_differences[i];
                 result.neighbor_indices[i] = current_col;
                 result.neighbor_values[i] = neighbor_values[i];
+                // std::cout<<"Neighbor "<< i <<": "<< result.neighbor_indices[i]
+                //     <<" value: "<< result.neighbor_values[i] << std::endl;
             }
             results[out_idx] = std::move(result);
 

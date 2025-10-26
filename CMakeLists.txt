@@ -46,7 +46,10 @@ target_include_directories(standalone_projection PRIVATE ${EIGEN_INCLUDE_DIR})
 add_executable(pairwise_comp_optimized
     src/pairwise_comp_optimized.cpp
 )
-target_include_directories(pairwise_comp_optimized PRIVATE ${EIGEN_INCLUDE_DIR})
+target_include_directories(pairwise_comp_optimized PRIVATE 
+    ${EIGEN_INCLUDE_DIR}
+    /scratch/mqa6002/software/local/include/
+    )
 
 add_executable(query_ava_matrix
     src/query_ava_matrix.cpp
@@ -65,10 +68,11 @@ target_include_directories(pc_mat_cmp_lib PUBLIC
     ${CMAKE_SOURCE_DIR}/bits/external/essentials/include/
 )
 
-add_executable(query_pc_mat
+add_executable(query_pc_mat_cmp
     src/query_pc_mat.cpp
 )
-target_link_libraries(query_pc_mat PRIVATE pc_mat_lib)
+# target_link_libraries(query_pc_mat PRIVATE pc_mat_lib)
+target_link_libraries(query_pc_mat_cmp PRIVATE pc_mat_cmp_lib)
 
 # ==== Link libraries ====
 # Only pairwise_comp_optimized depends on the BITS library

@@ -10,8 +10,11 @@
 #include <filesystem>
 
 //#include <immintrin.h>
-#include "../bits/include/elias_fano.hpp"
+#include "elias_fano.hpp"
 #include "clipp.h"
+#include "streamvbyte.h"
+#include "rice_sequence.hpp"
+
     
 namespace fs = std::filesystem;
 using namespace Eigen;
@@ -338,7 +341,7 @@ void write_sparse_results(const string& folder,
         fs::create_directories(folder);
     }
 
-    unordered_map<int, std::pair<vector<int>,vector<int64_t>>> reorganized_results;
+    unordered_map<int, std::pair<vector<int>,vector<uint32_t>>> reorganized_results;
     for (const auto& [row, col, value] : results) {
         reorganized_results[row].first.push_back(col);
         reorganized_results[row].second.push_back(value);
@@ -356,10 +359,10 @@ void write_sparse_results(const string& folder,
     // Map from row to first byte position in the binary file
     int64_t current_pos = 0;
 
-    auto get_dot_products_vec = [&](const vector<int64_t>& vals) {
-        vector<int64_t> dot_products_vec(vals.size());
+    auto get_dot_products_vec = [&](const vector<uint32_t>& vals) {
+        vector<uint32_t> dot_products_vec(vals.size());
         for (size_t k = 0; k < vals.size(); ++k) {
-            dot_products_vec[k] = static_cast<int64_t>(round(static_cast<double>(vals[k]) / dimension));
+            dot_products_vec[k] = static_cast<uint32_t>(round(static_cast<double>(vals[k]) / dimension));
         }
         return dot_products_vec;
     };
@@ -372,7 +375,7 @@ void write_sparse_results(const string& folder,
     for (const auto& [row, pair] : reorganized_results) {
         //NOTE: Assumes #genomes can be read in int32_t
         const vector<int32_t>& cols = pair.first;
-        const vector<int64_t>& vals = pair.second;
+        const vector<uint32_t>& vals = pair.second;
 
         // Record the first position for this row
         // essentials::save_pod(index_out, row);
@@ -390,7 +393,7 @@ void write_sparse_results(const string& folder,
         // std::cout<<"ef bytes: "<< ef.num_bytes() << std::endl;
         // std::cout<<"col size: "<<cols.size()<<" val size: "<<vals.size()<<std::endl;
 
-        vector<int64_t> dot_products_vec = get_dot_products_vec(vals);
+        vector<uint32_t> dot_products_vec = get_dot_products_vec(vals);
         bits::compact_vector cv;
         cv.build(dot_products_vec.begin(), dot_products_vec.size());
         cv.save(bin_out);
@@ -412,6 +415,132 @@ void write_sparse_results(const string& folder,
     string cmd2 = "zstd -f " + index_filename + " && rm -f " + index_filename;
     system(cmd1.c_str());
     system(cmd2.c_str());
+}
+
+void write_sparse_results_rice(const string& folder, 
+                         const vector<tuple<int, int, int64_t>>& results,
+                         int dimension) {
+
+    // Remove existing output folder if it exists, then create it
+    if (!fs::exists(folder)) {
+        fs::create_directories(folder);
+    }
+
+    unordered_map<int, std::pair<vector<int>,vector<uint32_t>>> reorganized_results;
+    for (const auto& [row, col, value] : results) {
+        reorganized_results[row].first.push_back(col);
+        reorganized_results[row].second.push_back(value);
+    }
+
+    // Write binary output: int32, vector<int32>, vector<int32>(number_of_cols, vector:diff_of_cols_with_previous_col, vector:values/2048)
+    string bin_filename = folder + "matrix.bin";
+    ofstream bin_out(bin_filename, ios::binary);
+
+    // File to store the position of the first byte for each row
+    // string index_filename = folder + "row_index.txt";
+    string index_filename = folder + "row_index.bin";
+    ofstream index_out(index_filename, ios::binary);
+
+    // Map from row to first byte position in the binary file
+    int64_t current_pos = 0;
+
+    auto get_dot_products_vec = [&](const vector<uint32_t>& vals) {
+        vector<uint32_t> dot_products_vec(vals.size());
+        for (size_t k = 0; k < vals.size(); ++k) {
+            dot_products_vec[k] = static_cast<uint32_t>(round(static_cast<double>(vals[k]) / dimension));
+        }
+        return dot_products_vec;
+    };
+
+    std::vector<uint32_t> row_vec(reorganized_results.size());
+    std::vector<uint64_t> curr_pos_vec(reorganized_results.size());
+    std::vector<uint32_t> start_neighbor(reorganized_results.size());
+
+    // Write each row's results in the new format, iterating only over rows present in reorganized_results
+    int indx = 0;
+    for (const auto& [row, pair] : reorganized_results) {
+        //NOTE: Assumes #genomes can be read in int32_t
+        const vector<int32_t>& cols = pair.first;
+        const vector<uint32_t>& vals = pair.second;
+
+        // Record the first position for this row
+        // essentials::save_pod(index_out, row);
+        // essentials::save_pod(index_out, current_pos);
+        row_vec[indx] = row;
+        curr_pos_vec[indx] = current_pos;
+        // std::cout<<"i: "<< indx <<" row: "<< row <<" at pos: "<< current_pos << std::endl;
+
+        // std::cout<<indx<<": Writing row: "<< row <<" at pos: "<< current_pos << std::endl;
+        
+        start_neighbor[indx++] = cols[0];
+        std::vector<uint32_t> delta_cols(cols.size()-1);
+        for (size_t k = 1; k < cols.size(); ++k) {
+            assert(cols[k] > cols[k-1]);
+            delta_cols[k-1] = cols[k] - cols[k-1];
+        }
+
+        bits::rice_sequence<> rs;
+        rs.encode(delta_cols.begin(), delta_cols.size());
+        rs.save(bin_out);
+        current_pos += rs.num_bytes();
+
+        // bits::elias_fano<> ef;
+        // ef.encode(cols.begin(), cols.size(), cols.back()+1);
+        // ef.save(bin_out);
+        // current_pos += ef.num_bytes();
+
+        // std::cout<<"ef bytes: "<< ef.num_bytes() << std::endl;
+        // std::cout<<"col size: "<<cols.size()<<" val size: "<<vals.size()<<std::endl;
+        // CHECK: dot products are set as 32 bit integers
+        vector<uint32_t> dot_products_vec = get_dot_products_vec(vals);
+        bits::rice_sequence<> rs_dp;
+        rs_dp.encode(dot_products_vec.begin(), dot_products_vec.size());
+        rs_dp.save(bin_out);
+        current_pos += rs_dp.num_bytes();
+
+        // bits::compact_vector cv;
+        // cv.build(dot_products_vec.begin(), dot_products_vec.size());
+        // cv.save(bin_out);
+        // current_pos += cv.num_bytes();
+        // std::cout<<" cv bytes: "<< cv.num_bytes() << std::endl;
+    }
+    bin_out.close();
+    bits::rice_sequence<> rs_rows;
+    rs_rows.encode(row_vec.begin(), row_vec.size());
+    rs_rows.save(index_out);
+
+    bits::rice_sequence<> rs_pos;
+    rs_pos.encode(curr_pos_vec.begin(), curr_pos_vec.size());
+    rs_pos.save(index_out);
+    index_out.close();
+
+    std::string neighbor_fn = folder + "neighbor_start.bin";
+    std::ofstream ngh_out(neighbor_fn, std::ios::binary);
+
+    bits::rice_sequence<> rs_start;
+    // for(int i=0; i<start_neighbor.size(); i++){
+    //     std::cout<<"Neighbor start for row "<< i <<": "<< start_neighbor[i] << std::endl;
+    // }
+    rs_start.encode(start_neighbor.begin(), start_neighbor.size());
+    rs_start.save(ngh_out);
+    ngh_out.close();
+
+    // bits::compact_vector cv_rows;
+    // cv_rows.build(row_vec.begin(), row_vec.size());
+    // cv_rows.save(index_out);
+    // bits::compact_vector cv_pos;
+    // cv_pos.build(curr_pos_vec.begin(), curr_pos_vec.size());
+    // cv_pos.save(index_out);
+    // index_out.close();
+    
+
+    // Compress the output files using zstd and remove the originals
+    string cmd1 = "zstd -f " + bin_filename + " && rm -f " + bin_filename;
+    string cmd2 = "zstd -f " + index_filename + " && rm -f " + index_filename;
+    string cmd3 = "zstd -f " + neighbor_fn + " && rm -f " + neighbor_fn;
+    system(cmd1.c_str());
+    system(cmd2.c_str());
+    system(cmd3.c_str());
 }
 
 int main(int argc, char* argv[]) {
@@ -524,8 +653,8 @@ int main(int argc, char* argv[]) {
             VectorXd norms_j = Map<VectorXd>(all_norms.data() + begin_j, end_j - begin_j);
             auto t_blockj_end = chrono::high_resolution_clock::now();
 
-            cout << "Processing block (" << begin_i << ":" << end_i << ") x ("
-                << begin_j << ":" << end_j << ")" << endl;
+            // cout << "Processing block (" << begin_i << ":" << end_i << ") x ("
+            //     << begin_j << ":" << end_j << ")" << endl;
 
             auto t_dot_start = chrono::high_resolution_clock::now();
             SparseResult result;
@@ -555,8 +684,9 @@ int main(int argc, char* argv[]) {
     cout << "Total results: " << all_results.size() << endl;
 
     // Write results to the shard subfolder
-    write_sparse_results_prev(shard_folder, all_results, dimension);
+    // write_sparse_results_prev(shard_folder, all_results, dimension);
     // write_sparse_results(shard_folder, all_results, dimension);
+    write_sparse_results_rice(shard_folder, all_results, dimension);
     
     return 0;
 }
