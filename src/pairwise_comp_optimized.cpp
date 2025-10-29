@@ -12,8 +12,9 @@
 //#include <immintrin.h>
 #include "elias_fano.hpp"
 #include "clipp.h"
-#include "streamvbyte.h"
 #include "rice_sequence.hpp"
+#include "streamvbyte.h"
+#include "streamvbytedelta.h"
 
     
 namespace fs = std::filesystem;
@@ -543,6 +544,161 @@ void write_sparse_results_rice(const string& folder,
     system(cmd3.c_str());
 }
 
+
+void write_sparse_results_vbyte(const string& folder, 
+                         const vector<tuple<int, int, int64_t>>& results,
+                         int dimension) {
+
+    // Remove existing output folder if it exists, then create it
+    if (!fs::exists(folder)) {
+        fs::create_directories(folder);
+    }
+
+    unordered_map<int, std::pair<vector<uint32_t>,vector<uint32_t>>> reorganized_results;
+    for (const auto& [row, col, value] : results) {
+        reorganized_results[row].first.push_back(col);
+        reorganized_results[row].second.push_back(value);
+    }
+
+    // Write binary output: int32, vector<int32>, vector<int32>(number_of_cols, vector:diff_of_cols_with_previous_col, vector:values/2048)
+    string bin_filename = folder + "matrix.bin";
+    ofstream bin_out(bin_filename, ios::binary);
+
+    // File to store the position of the first byte for each row
+    // string index_filename = folder + "row_index.txt";
+    string index_filename = folder + "row_index.bin";
+    ofstream index_out(index_filename, ios::binary);
+
+    // Map from row to first byte position in the binary file
+    int64_t current_pos = 0;
+
+    auto get_dot_products_vec = [&](const vector<uint32_t>& vals) {
+        vector<uint32_t> dot_products_vec(vals.size());
+        for (size_t k = 0; k < vals.size(); ++k) {
+            dot_products_vec[k] = static_cast<uint32_t>(round(static_cast<double>(vals[k]) / dimension));
+        }
+        return dot_products_vec;
+    };
+
+    std::vector<uint32_t> row_vec(reorganized_results.size());
+    std::vector<uint64_t> curr_pos_vec(reorganized_results.size());
+    std::vector<uint32_t> num_neighbors_vec(reorganized_results.size());
+
+    // Write each row's results in the new format, iterating only over rows present in reorganized_results
+    int indx = 0;
+    for (auto& [row, pair] : reorganized_results) {
+        //NOTE: Assumes #genomes can be read in int32_t
+        vector<uint32_t>& cols = pair.first;
+        vector<uint32_t>& vals = pair.second;
+
+        // Record the first position for this row
+        // essentials::save_pod(index_out, row);
+        // essentials::save_pod(index_out, current_pos);
+        row_vec[indx] = row;
+        curr_pos_vec[indx] = current_pos;
+        num_neighbors_vec[indx++] = cols.size();
+        // std::cout<<"i: "<< indx <<" row: "<< row <<" at pos: "<< current_pos << std::endl;
+
+        // std::cout<<indx<<": Writing row: "<< row <<" at pos: "<< current_pos << std::endl;
+        
+        // start_neighbor[indx++] = cols[0];
+        // std::vector<uint32_t> delta_cols(cols.size()-1);
+        // for (size_t k = 1; k < cols.size(); ++k) {
+        //     assert(cols[k] > cols[k-1]);
+        //     delta_cols[k-1] = cols[k] - cols[k-1];
+        // }
+
+
+        uint32_t* col_array = cols.data();
+        // uint8_t* encoded_col_array = static_cast<uint8_t*>(malloc(streamvbyte_max_compressedbytes(cols.size())));
+        std::vector<uint8_t> encoded_col_vec(streamvbyte_max_compressedbytes(cols.size()));
+        uint64_t bytes_written = streamvbyte_delta_encode(col_array, cols.size(), encoded_col_vec.data(), 0);
+        bin_out.write(reinterpret_cast<const char*>(encoded_col_vec.data()), bytes_written);
+        current_pos += bytes_written;
+        // bits::rice_sequence<> rs;
+        // rs.encode(delta_cols.begin(), delta_cols.size());
+        // rs.save(bin_out);
+        // current_pos += rs.num_bytes();
+
+        // bits::elias_fano<> ef;
+        // ef.encode(cols.begin(), cols.size(), cols.back()+1);
+        // ef.save(bin_out);
+        // current_pos += ef.num_bytes();
+
+        // std::cout<<"ef bytes: "<< ef.num_bytes() << std::endl;
+        // std::cout<<"col size: "<<cols.size()<<" val size: "<<vals.size()<<std::endl;
+        // CHECK: dot products are set as 32 bit integers
+        std::vector<uint32_t> dot_products_vec = get_dot_products_vec(vals);
+        // bits::rice_sequence<> rs_dp;
+        // rs_dp.encode(dot_products_vec.begin(), dot_products_vec.size());
+        // rs_dp.save(bin_out);
+        // current_pos += rs_dp.num_bytes();
+
+        uint32_t* dp_array = dot_products_vec.data();
+        // uint8_t* encoded_dp_array = static_cast<uint8_t*>(malloc(streamvbyte_max_compressedbytes(dot_products_vec.size())));
+        std::vector<uint8_t> encoded_dp_vec(streamvbyte_max_compressedbytes(dot_products_vec.size()));
+        uint64_t dp_bytes_written = streamvbyte_encode(dp_array, dot_products_vec.size(), encoded_dp_vec.data());
+        bin_out.write(reinterpret_cast<const char*>(encoded_dp_vec.data()), dp_bytes_written);
+        current_pos += dp_bytes_written;
+        // bits::compact_vector cv;
+        // cv.build(dot_products_vec.begin(), dot_products_vec.size());
+        // cv.save(bin_out);
+        // current_pos += cv.num_bytes();
+        // std::cout<<" cv bytes: "<< cv.num_bytes() << std::endl;
+    }
+    bin_out.close();
+
+    // this rice sequence will give the size of all vbyte encoding sizes
+    bits::rice_sequence<> rs_pos;
+    rs_pos.encode(curr_pos_vec.begin(), curr_pos_vec.size());
+    rs_pos.save(index_out);
+
+    uint32_t* row_array = row_vec.data();
+    std::vector<uint8_t> encoded_row_vec(streamvbyte_max_compressedbytes(row_vec.size()));
+    // uint8_t* encoded_row_array = static_cast<uint8_t*>(malloc(streamvbyte_max_compressedbytes(row_vec.size())));
+    uint64_t row_bytes_written = streamvbyte_encode(row_array, row_vec.size(), encoded_row_vec.data());
+    index_out.write(reinterpret_cast<const char*>(encoded_row_vec.data()), row_bytes_written);
+    // bits::rice_sequence<> rs_rows;
+    // rs_rows.encode(row_vec.begin(), row_vec.size());
+    // rs_rows.save(index_out);
+    index_out.close();
+
+    std::string neighbor_fn = folder + "neighbor_count.bin";
+    std::ofstream ngh_out(neighbor_fn, std::ios::binary);
+
+    
+    uint32_t* num_neighbors_array = num_neighbors_vec.data();
+    std::vector<uint8_t> encoded_num_neighbors_vec(streamvbyte_max_compressedbytes(num_neighbors_vec.size()));
+    uint64_t num_neighbors_bytes_written = streamvbyte_encode(num_neighbors_array, num_neighbors_vec.size(), encoded_num_neighbors_vec.data());
+    ngh_out.write(reinterpret_cast<const char*>(encoded_num_neighbors_vec.data()), num_neighbors_bytes_written);
+    ngh_out.close();
+    // bits::rice_sequence<> rs_start;
+    // for(int i=0; i<start_neighbor.size(); i++){
+    //     std::cout<<"Neighbor start for row "<< i <<": "<< start_neighbor[i] << std::endl;
+    // }
+    // rs_start.encode(start_neighbor.begin(), start_neighbor.size());
+    // rs_start.save(ngh_out);
+    // ngh_out.close();
+
+    // bits::compact_vector cv_rows;
+    // cv_rows.build(row_vec.begin(), row_vec.size());
+    // cv_rows.save(index_out);
+    // bits::compact_vector cv_pos;
+    // cv_pos.build(curr_pos_vec.begin(), curr_pos_vec.size());
+    // cv_pos.save(index_out);
+    // index_out.close();
+    
+
+    // Compress the output files using zstd and remove the originals
+    string cmd1 = "zstd -f " + bin_filename + " && rm -f " + bin_filename;
+    string cmd2 = "zstd -f " + index_filename + " && rm -f " + index_filename;
+    string cmd3 = "zstd -f " + neighbor_fn + " && rm -f " + neighbor_fn;
+    system(cmd1.c_str());
+    system(cmd2.c_str());
+    system(cmd3.c_str());
+}
+
+
 int main(int argc, char* argv[]) {
     // Argument parsing using clipp
     string matrix_file;
@@ -553,6 +709,8 @@ int main(int argc, char* argv[]) {
     int num_shards = 1;
     int shard_idx = 0;
     int strategy = 0; // 0=random projections, 1=minHashes
+    int start_shard = 0;
+    int end_shard = num_shards;
 
     bool show_help = false;
 
@@ -565,6 +723,8 @@ int main(int argc, char* argv[]) {
         clipp::option("--num_shards") & clipp::value("int", num_shards),
         clipp::option("--shard_idx") & clipp::value("int", shard_idx),
         clipp::option("--strategy") & clipp::value("int", strategy),
+        clipp::option("--start_shard") & clipp::value("int", start_shard),
+        clipp::option("--end_shard") & clipp::value("int", end_shard),
         clipp::option("--help").set(show_help)
     );
 
@@ -591,8 +751,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    omp_set_num_threads(num_threads);
-
     vector<double> all_norms;
     string line;
     ifstream norms_in(norms_file);
@@ -602,13 +760,6 @@ int main(int argc, char* argv[]) {
         double norm = stod(line.substr(pos + 1));
         all_norms.push_back(norm*norm);
     }
-
-    // Output to subfolder for this shard
-    string shard_folder = output_folder + "shard_" + to_string(shard_idx) + "/";
-    if (!fs::exists(shard_folder)) {
-        fs::create_directories(shard_folder);
-    }
-
     // Calculate chunk size
     int bytes_per_vector = dimension * sizeof(int32_t);
     int64_t max_bytes = static_cast<int64_t>(max_memory_gb * 1024 * 1024 * 1024);
@@ -625,68 +776,86 @@ int main(int argc, char* argv[]) {
 
     cout << "Total vectors: " << total_vectors << endl;
 
-    // Compute row range for this shard
-    int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
-    int begin_row = shard_idx * rows_per_shard;
-    int end_row = min(begin_row + rows_per_shard, total_vectors);
-
-    cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row << endl;
-
-    vector<tuple<int, int, int64_t>> all_results;
-
     auto start_time = chrono::high_resolution_clock::now();
+    
+    // int outer_threads = min(num_threads, min(8, num_shards));
+    // int inner_threads = max(1, num_threads / outer_threads);
+    // omp_set_nested(1);
+    // omp_set_max_active_levels(2);
 
-    for (int begin_i = begin_row; begin_i < end_row; begin_i += size_of_chunk) {
-        int end_i = min(begin_i + size_of_chunk, end_row);
+    // omp_set_num_threads(outer_threads);
+    // #pragma omp parallel for schedule(dynamic)
+    omp_set_num_threads(num_threads);
+    for(int i=start_shard; i<end_shard; i++){
+        // omp_set_num_threads(inner_threads);
 
-        auto t_blocki_start = chrono::high_resolution_clock::now();
-        MatrixXi block_i = load_matrix_block(matrix_file, dimension, begin_i, end_i);
-        VectorXd norms_i = Map<VectorXd>(all_norms.data() + begin_i, end_i - begin_i);
+        shard_idx = i;
+        string shard_folder = output_folder + "shard_" + to_string(shard_idx) + "/";
+        if (!fs::exists(shard_folder)) {
+            fs::create_directories(shard_folder);
+        }
 
-        auto t_blocki_end = chrono::high_resolution_clock::now();
+        // Compute row range for this shard
+        int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+        int begin_row = shard_idx * rows_per_shard;
+        int end_row = min(begin_row + rows_per_shard, total_vectors);
 
-        for (int begin_j = 0; begin_j < total_vectors; begin_j += size_of_chunk) {
-            int end_j = min(begin_j + size_of_chunk, total_vectors);
+        cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row << endl;
 
-            auto t_blockj_start = chrono::high_resolution_clock::now();
-            MatrixXi block_j = load_matrix_block(matrix_file, dimension, begin_j, end_j);
-            VectorXd norms_j = Map<VectorXd>(all_norms.data() + begin_j, end_j - begin_j);
-            auto t_blockj_end = chrono::high_resolution_clock::now();
+        vector<tuple<int, int, int64_t>> all_results;
 
-            // cout << "Processing block (" << begin_i << ":" << end_i << ") x ("
-            //     << begin_j << ":" << end_j << ")" << endl;
+        for (int begin_i = begin_row; begin_i < end_row; begin_i += size_of_chunk) {
+            int end_i = min(begin_i + size_of_chunk, end_row);
 
-            auto t_dot_start = chrono::high_resolution_clock::now();
-            SparseResult result;
-            if (strategy == 0){ //random projections
-                result = compute_sparse_dot_products_optimized(block_i, block_j, norms_i, norms_j, dimension);
-            }
-            else{ //minHashes
-                result = compute_jaccard_with_MinHash(block_i, block_j, dimension);
-            }
+            // auto t_blocki_start = chrono::high_resolution_clock::now();
+            MatrixXi block_i = load_matrix_block(matrix_file, dimension, begin_i, end_i);
+            VectorXd norms_i = Map<VectorXd>(all_norms.data() + begin_i, end_i - begin_i);
 
-            auto t_store_start = chrono::high_resolution_clock::now();
-            // Add global offsets and store
-            for (size_t k = 0; k < result.values.size(); ++k) {
-                all_results.emplace_back(
-                    begin_i + result.rows[k],
-                    begin_j + result.cols[k],
-                    result.values[k]
-                );
+            // auto t_blocki_end = chrono::high_resolution_clock::now();
+
+            for (int begin_j = 0; begin_j < total_vectors; begin_j += size_of_chunk) {
+                int end_j = min(begin_j + size_of_chunk, total_vectors);
+
+                // auto t_blockj_start = chrono::high_resolution_clock::now();
+                MatrixXi block_j = load_matrix_block(matrix_file, dimension, begin_j, end_j);
+                VectorXd norms_j = Map<VectorXd>(all_norms.data() + begin_j, end_j - begin_j);
+                // auto t_blockj_end = chrono::high_resolution_clock::now();
+
+                // cout << "Processing block (" << begin_i << ":" << end_i << ") x ("
+                //     << begin_j << ":" << end_j << ")" << endl;
+
+                // auto t_dot_start = chrono::high_resolution_clock::now();
+                SparseResult result;
+                if (strategy == 0){ //random projections
+                    result = compute_sparse_dot_products_optimized(block_i, block_j, norms_i, norms_j, dimension);
+                }
+                else{ //minHashes
+                    result = compute_jaccard_with_MinHash(block_i, block_j, dimension);
+                }
+
+                // auto t_store_start = chrono::high_resolution_clock::now();
+                // Add global offsets and store
+                for (size_t k = 0; k < result.values.size(); ++k) {
+                    all_results.emplace_back(
+                        begin_i + result.rows[k],
+                        begin_j + result.cols[k],
+                        result.values[k]
+                    );
+                }
             }
         }
+
+        // Write results to the shard subfolder
+        // write_sparse_results_prev(shard_folder, all_results, dimension);
+        // write_sparse_results(shard_folder, all_results, dimension);
+        write_sparse_results_rice(shard_folder, all_results, dimension);
+        // write_sparse_results_vbyte(shard_folder, all_results, dimension);
     }
 
     auto end_time = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
 
     cout << "Total computation time: " << duration.count() << " ms" << endl;
-    cout << "Total results: " << all_results.size() << endl;
-
-    // Write results to the shard subfolder
-    // write_sparse_results_prev(shard_folder, all_results, dimension);
-    // write_sparse_results(shard_folder, all_results, dimension);
-    write_sparse_results_rice(shard_folder, all_results, dimension);
     
     return 0;
 }

@@ -108,6 +108,7 @@ namespace pc_mat {
     }
 
     // Calculate which shard contains a given row
+    // TODO: Double check correctness
     int get_shard_for_row(int row, int total_vectors, int num_shards) {
         int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
         return row / rows_per_shard;
@@ -162,6 +163,42 @@ namespace pc_mat {
             address_of_rows.push_back({static_cast<int>(rs_row.access(i)), 
                 static_cast<int64_t>(rs_address.access(i))});
         }
+        
+        return address_of_rows;
+    }
+
+    vector<pair<int, int64_t>> load_shard_row_index_vbyte(const string& shard_folder) {
+        vector<pair<int32_t, int64_t>> address_of_rows;
+        
+        string index_filename = shard_folder + "/row_index.bin";
+        ifstream index_file(index_filename, ios::binary);
+        
+        if (!index_file) {
+            cerr << "Error: Could not open " << index_filename << endl;
+            return address_of_rows;
+        }
+        // bits::compact_vector row_cv;
+        // bits::compact_vector address_cv;
+        // row_cv.load(index_file);
+        // address_cv.load(index_file);
+
+        bits::rice_sequence<> rs_row;
+        rs_row.load(index_file);
+        uint32_t row_size = rs_row.size();
+
+        // std::vector<uint8_t> encoded_row_vec(streamvbyte_max_compressedbytes(row_size));
+        // index_file.read(reinterpret_cast<char*>(encoded_row_vec.data()), streamvbyte_max_compressedbytes(row_size));
+        // std::vector<uint32_t> decoded_row_vec(row_size);
+        // size_t row_bytes_read = streamvbyte_decode(encoded_row_vec.data(), decoded_row_vec.data(), row_size);
+        // // std::cout<<"Decoded
+        // rs_address.load(index_file);
+
+        // for (size_t i = 0; i < rs_row.size(); ++i) {
+        //     // std::cout<<"Loaded row index "<< i <<": "<< rs_row.access(i)
+        //     //     <<" address: "<< rs_address.access(i) << std::endl;
+        //     address_of_rows.push_back({static_cast<int>(rs_row.access(i)), 
+        //         static_cast<int64_t>(rs_address.access(i))});
+        // }
         
         return address_of_rows;
     }
@@ -305,8 +342,140 @@ namespace pc_mat {
         // std::cout<<"Loading neighbors for "<< rows.size() <<" rows using rice encoding."<<std::endl;
         // Map from shard index to vector of (input index, row)
         unordered_map<int, vector<pair<size_t, int>>> shard_to_queries;
+        // std::ofstream fil_query("filtered_query.txt");
         for (size_t i = 0; i < rows.size(); ++i) {
             int shard_idx = get_shard_for_row(rows[i], total_vectors, num_shards);
+            string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
+            // if(fs::is_directory(shard_folder)){
+            //     std::cout<<"Row "<< rows[i] <<" goes to shard "<< shard_idx << std::endl;
+            //     fil_query<<identifiers[rows[i]]<<"\n";
+            // }
+            shard_to_queries[shard_idx].emplace_back(i, rows[i]);
+        }
+        // fil_query.close();
+        // exit(1);
+        vector<NeighborData> results(rows.size());
+
+        for (const auto& [shard_idx, queries] : shard_to_queries) {
+            string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
+            // std::cout<<"Processing shard: "<< shard_folder << std::endl;
+
+            // Decompress files in this shard
+            decompress_zstd_files(shard_folder);
+
+            // Load the row index for this shard
+            vector<pair<int, int64_t>> address_of_rows = load_shard_row_index_rice(shard_folder);
+            if (address_of_rows.empty()) {
+                // All queries in this shard will be empty
+                for (const auto& [out_idx, _] : queries) {
+                    results[out_idx] = NeighborData{};
+                }
+                // Clean up and continue
+                cleanup_decompressed_files(shard_folder);
+                continue;
+            }
+
+            // Get file size to handle the last row
+            string bin_filename = shard_folder + "/matrix.bin";
+            ifstream bin_file_size(bin_filename, ios::binary);
+            if (!bin_file_size) {
+                cerr << "Error: Could not open " << bin_filename << endl;
+                for (const auto& [out_idx, _] : queries) {
+                    results[out_idx] = NeighborData{};
+                }
+                cleanup_decompressed_files(shard_folder);
+                continue;
+            }
+            bin_file_size.seekg(0, ios::end);
+            int64_t file_size = bin_file_size.tellg();
+            bin_file_size.close();
+
+            std::string neighbor_fn = shard_folder + "/neighbor_start.bin";
+            ifstream ngh_file(neighbor_fn, ios::binary);
+            bits::rice_sequence<> rs_start;
+            rs_start.load(ngh_file);
+            ngh_file.close();
+            // std::cout<<"loaded neighbor starts, size: "<< rs_start.size() << std::endl;
+            // Build a map from row to address index for fast lookup
+            unordered_map<int, size_t> row_to_addr_idx;
+            for (size_t i = 0; i < address_of_rows.size(); ++i) {
+                row_to_addr_idx[address_of_rows[i].first] = i;
+            }
+            uint64_t curr_indx = 0;
+            for (const auto& [out_idx, query_row] : queries) {
+                NeighborData result;
+                auto it = row_to_addr_idx.find(query_row);
+                if (it == row_to_addr_idx.end()) {
+                    results[out_idx] = result;
+                    continue;
+                }
+                size_t addr_idx = it->second;
+                int64_t row_address = address_of_rows[addr_idx].second;
+                // std::cout<<"addr_idx: "<< addr_idx <<" query_row: "<< query_row
+                //     <<" row_address: "<< row_address << std::endl;
+
+                
+                // if (addr_idx + 1 < address_of_rows.size()) {
+                //     number_of_neighbors = (address_of_rows[addr_idx + 1].second - row_address) / 8;
+                // } else {
+                //     number_of_neighbors = (file_size - row_address) / 8;
+                // }
+                // if (number_of_neighbors <= 0) {
+                //     results[out_idx] = result;
+                //     continue;
+                // }
+                // Read the neighbor data
+                ifstream bin_file(bin_filename, ios::binary);
+                if (!bin_file) {
+                    cerr << "Error: Could not open " << bin_filename << " for row " << query_row << endl;
+                    results[out_idx] = result;
+                    continue;
+                }
+                bin_file.seekg(row_address);
+
+                bits::rice_sequence<> rs_delta;
+                rs_delta.load(bin_file);
+                bits::rice_sequence<> rs_values;
+                rs_values.load(bin_file);
+
+                int32_t number_of_neighbors = rs_values.size();
+                // std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
+                
+                result.neighbor_indices.resize(number_of_neighbors);
+                result.neighbor_values.resize(number_of_neighbors);
+                
+                result.neighbor_indices[0] = rs_start.access(addr_idx);
+                result.neighbor_values[0] = static_cast<uint32_t>(rs_values.access(0));
+                // std::cout<<"First neighbor: "<< result.neighbor_indices[0]
+                //     <<" value: "<< result.neighbor_values[0] << std::endl;
+                for (int i = 1; i < number_of_neighbors; ++i) {
+                    result.neighbor_indices[i] = result.neighbor_indices[i-1] + rs_delta.access(i-1);
+                    result.neighbor_values[i] = static_cast<uint32_t>(rs_values.access(i));
+                    // std::cout<<"Neighbor "<< i <<": "<< result.neighbor_indices[i]
+                    //     <<" value: "<< result.neighbor_values[i] << std::endl;
+                }
+                results[out_idx] = std::move(result);
+            }
+
+            // Clean up decompressed files for this shard
+            cleanup_decompressed_files(shard_folder);
+        }
+
+        return results;
+    }
+
+    vector<NeighborData> load_neighbors_for_rows_vbyte(
+        const string& matrix_folder,
+        const vector<int>& rows,
+        int total_vectors,
+        int num_shards
+    ) {
+        // std::cout<<"Loading neighbors for "<< rows.size() <<" rows using rice encoding."<<std::endl;
+        // Map from shard index to vector of (input index, row)
+        unordered_map<int, vector<pair<size_t, int>>> shard_to_queries;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            int shard_idx = get_shard_for_row(rows[i], total_vectors, num_shards);
+            // std::cout<<"Row "<< rows[i] <<" goes to shard "<< shard_idx << std::endl;
             shard_to_queries[shard_idx].emplace_back(i, rows[i]);
         }
 
@@ -314,12 +483,13 @@ namespace pc_mat {
 
         for (const auto& [shard_idx, queries] : shard_to_queries) {
             string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
+            // std::cout<<"Processing shard: "<< shard_folder << std::endl;
 
             // Decompress files in this shard
             decompress_zstd_files(shard_folder);
 
             // Load the row index for this shard
-            vector<pair<int, int64_t>> address_of_rows = load_shard_row_index_rice(shard_folder);
+            vector<pair<int, int64_t>> address_of_rows = load_shard_row_index_vbyte(shard_folder);
             if (address_of_rows.empty()) {
                 // All queries in this shard will be empty
                 for (const auto& [out_idx, _] : queries) {
@@ -623,6 +793,7 @@ namespace pc_mat {
         // Discover number of shards
         int num_shards = discover_shards(matrix_folder);
         // num_shards = 100;
+        // int num_shards = 1000;
         // cout << "DEBUG NUM SHASS" << endl;
         if (num_shards <= 0) {
             cerr << "Error: No shard folders found in " << matrix_folder << endl;
@@ -659,7 +830,8 @@ namespace pc_mat {
 
         // Query all at once using load_neighbors_for_rows
         // vector<NeighborData> all_neighbors = load_neighbors_for_rows(matrix_folder, queries, total_vectors, num_shards);
-        vector<NeighborData> all_neighbors = load_neighbors_for_rows_rice(matrix_folder, queries, total_vectors, num_shards);
+        vector<NeighborData> all_neighbors = load_neighbors_for_rows_rice(matrix_folder, queries, 
+            total_vectors, num_shards);
 
         vector<Result> all_results(queries.size());
         for (size_t q = 0; q < queries.size(); ++q) {
