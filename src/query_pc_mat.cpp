@@ -48,15 +48,15 @@ int main(int argc, char* argv[]) {
 
     for(int i=0; i< all_results.size(); i++){
         const pc_mat::Result& res = all_results[i];
-        // std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
+        std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
         log_file <<res.self_id << " "<<res.neighbor_ids.size()<< std::endl;
         int64_t num_neighbors_to_show = std::min<int64_t>(10, res.neighbor_ids.size());
-        // std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
-        // for (size_t j = 0; j < num_neighbors_to_show; ++j) {
-        //     std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
-        //          << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
-        // }
-        // std::cout << std::endl;
+        std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
+        for (size_t j = 0; j < num_neighbors_to_show; ++j) {
+            std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
+                 << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
+        }
+        std::cout << std::endl;
     }
     return 0;
 }

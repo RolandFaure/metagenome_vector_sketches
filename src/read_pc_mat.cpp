@@ -1,5 +1,8 @@
 #include "read_pc_mat.h"
 
+#include <thread>
+#include <chrono>
+
 namespace fs = std::filesystem;
 
 namespace pc_mat {
@@ -155,7 +158,8 @@ namespace pc_mat {
         }
 
         vector<NeighborData> results(rows.size());
-
+        int query_count = 0;
+        
         for (const auto& [shard_idx, queries] : shard_to_queries) {
             string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
 
@@ -165,6 +169,7 @@ namespace pc_mat {
             // Load the row index for this shard
             vector<pair<int, int64_t>> address_of_rows = load_shard_row_index(shard_folder);
             if (address_of_rows.empty()) {
+                cerr<<"shard empty addresses\n";
                 // All queries in this shard will be empty
                 for (const auto& [out_idx, _] : queries) {
                     results[out_idx] = NeighborData{};
@@ -176,9 +181,16 @@ namespace pc_mat {
 
             // Get file size to handle the last row
             string bin_filename = shard_folder + "/matrix.bin";
-            ifstream bin_file_size(bin_filename, ios::binary);
+            // ifstream bin_file_size(bin_filename, ios::binary);
+            ifstream bin_file_size;
+            for (int attempt = 0; attempt < 5; ++attempt) {
+                bin_file_size.open(bin_filename, ios::binary);
+                if (bin_file_size) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
             if (!bin_file_size) {
                 cerr << "Error: Could not open " << bin_filename << endl;
+                cerr<<"query size: "<<queries.size()<<" sample row: "<<queries[0].second<<std::endl;
                 for (const auto& [out_idx, _] : queries) {
                     results[out_idx] = NeighborData{};
                 }
@@ -196,6 +208,8 @@ namespace pc_mat {
             }
 
             for (const auto& [out_idx, query_row] : queries) {
+                query_count++;
+                std::cout<<query_count<<" "<<out_idx<<": "<<query_row<<": ";
                 NeighborData result;
                 auto it = row_to_addr_idx.find(query_row);
                 if (it == row_to_addr_idx.end()) {
@@ -216,7 +230,13 @@ namespace pc_mat {
                     continue;
                 }
                 // Read the neighbor data
-                ifstream bin_file(bin_filename, ios::binary);
+                // ifstream bin_file(bin_filename, ios::binary);
+                ifstream bin_file;
+                for (int attempt = 0; attempt < 5; ++attempt) {
+                    bin_file.open(bin_filename, ios::binary);
+                    if (bin_file) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }
                 if (!bin_file) {
                     cerr << "Error: Could not open " << bin_filename << " for row " << query_row << endl;
                     results[out_idx] = result;
@@ -239,7 +259,7 @@ namespace pc_mat {
                     result.neighbor_values[i] = neighbor_values[i];
                 }
                 results[out_idx] = std::move(result);
-
+                std::cout<<number_of_neighbors<<std::endl;
             }
 
             // Clean up decompressed files for this shard
@@ -533,6 +553,7 @@ namespace pc_mat {
                     float norm_a = vector_norms[query_row]*vector_norms[query_row];
                     float norm_b = vector_norms[neighbor_idx]*vector_norms[neighbor_idx];
                     double jaccard = intersection / (norm_a + norm_b - intersection);
+                    // std::cout<<"is: "<<intersection<<" ns: "<<norm_a<<" nn: "<<norm_b<<" jac: "<<jaccard<<std::endl;
                     res.neighbor_ids.push_back(neighbor_id);
                     res.jaccard_similarities.push_back(jaccard);
                     // if (neighbor_idx == 34){

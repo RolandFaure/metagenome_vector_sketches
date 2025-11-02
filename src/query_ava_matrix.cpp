@@ -10,6 +10,8 @@
 #include <regex>
 #include <unordered_set>
 #include <numeric>
+#include <cassert>
+
 
 #include "clipp.h"
 
@@ -215,7 +217,8 @@ vector<NeighborData> load_neighbors_for_rows(
             row_to_addr_idx[address_of_rows[i].first] = i;
         }
 
-        for (const auto& [out_idx, query_row] : queries) {
+        for (const auto [out_idx, query_row] : queries) {
+            assert(out_idx < results.size());
             NeighborData result;
             auto it = row_to_addr_idx.find(query_row);
             if (it == row_to_addr_idx.end()) {
@@ -238,7 +241,7 @@ vector<NeighborData> load_neighbors_for_rows(
                 results[out_idx] = result;
                 continue;
             }
-            // std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
+            std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
             // Read the neighbor data
             ifstream bin_file(bin_filename, ios::binary);
             if (!bin_file) {
@@ -250,8 +253,20 @@ vector<NeighborData> load_neighbors_for_rows(
 
             vector<int32_t> neighbor_differences(number_of_neighbors);
             bin_file.read(reinterpret_cast<char*>(neighbor_differences.data()), number_of_neighbors * sizeof(int32_t));
+            if (!bin_file) {
+                cerr << "Read failed for differences (row " << query_row << "). bytes read: "
+                    << bin_file.gcount() << '\n';
+                results[out_idx] = result;
+                continue;
+            }
             vector<int32_t> neighbor_values(number_of_neighbors);
             bin_file.read(reinterpret_cast<char*>(neighbor_values.data()), number_of_neighbors * sizeof(int32_t));
+            if (!bin_file) {
+                cerr << "Read failed for differences (row " << query_row << "). bytes read: "
+                    << bin_file.gcount() << '\n';
+                results[out_idx] = result;
+                continue;
+            }   
 
             result.neighbor_indices.resize(number_of_neighbors);
             result.neighbor_values.resize(number_of_neighbors);
@@ -261,9 +276,18 @@ vector<NeighborData> load_neighbors_for_rows(
                 current_col += neighbor_differences[i];
                 result.neighbor_indices[i] = current_col;
                 result.neighbor_values[i] = neighbor_values[i];
-                // std::cout<<"Neighbor "<< i <<": "<< result.neighbor_indices[i]
-                //     <<" value: "<< result.neighbor_values[i] << std::endl;
+                
+                if(current_col == 524305 || current_col == 697508){
+                    std::cout<<"Neighbor "<< i <<": "<< result.neighbor_indices[i]
+                    <<" value: "<< result.neighbor_values[i] << std::endl;    
+                }
+                if(result.neighbor_indices[i] == 524305 || result.neighbor_indices[i] == 697508){
+                    std::cout<<"Neighbor "<< i <<": "<< result.neighbor_indices[i]
+                    <<" value: "<< result.neighbor_values[i] << std::endl;    
+                }
+                
             }
+            std::cout<<result.neighbor_indices.size()<<" "<<result.neighbor_values.size()<<std::endl;
             results[out_idx] = std::move(result);
 
         }
@@ -552,7 +576,7 @@ int main(int argc, char* argv[]) {
 
     // Query all at once using load_neighbors_for_rows
     vector<NeighborData> all_neighbors = load_neighbors_for_rows(matrix_folder, queries, total_vectors, num_shards);
-
+    std::cout<<"#queries: "<<queries.size()<<std::endl;
     for (size_t q = 0; q < queries.size(); ++q) {
         int query_row = queries[q];
         cout << "Query: " << query_row << " (" << identifiers[query_row] << ")" << endl;
@@ -571,9 +595,11 @@ int main(int argc, char* argv[]) {
             // Pair each neighbor index with its value (intersection size)
             vector<pair<int, int>> neighbor_pairs;
             for (size_t i = 0; i < neighbors.neighbor_indices.size(); ++i) {
+                if(neighbors.neighbor_indices[i] == 697508 || neighbors.neighbor_indices[i] == 524305 | neighbors.neighbor_values[i] == 0){
+                    std::cout<<i<<" "<<neighbors.neighbor_indices[i]<<" "<<neighbors.neighbor_values[i]<<std::endl;
+                }
                 neighbor_pairs.emplace_back(neighbors.neighbor_indices[i], neighbors.neighbor_values[i]);
             }
-
             // Sort by Jaccard index (intersection / union) in descending order
             // Jaccard = intersection / (|A| + |B| - intersection)
             // |A| = vector_norms[query_row], |B| = vector_norms[neighbor_idx]
@@ -588,7 +614,8 @@ int main(int argc, char* argv[]) {
                 double jac_b = inter_b / (norm_a + norm_bb - inter_b);
                 return jac_a > jac_b;
             });
-            int neighbor_count = 0;
+            int neighbor_count = 1;
+
             for (const auto& [neighbor_idx, intersection] : neighbor_pairs) {
                 string neighbor_id = (neighbor_idx < total_vectors) ? identifiers[neighbor_idx] : "UNKNOWN";
                 float norm_a = vector_norms[query_row]*vector_norms[query_row];
@@ -596,18 +623,23 @@ int main(int argc, char* argv[]) {
                 double jaccard = intersection / (norm_a + norm_b - intersection);
                 // if (neighbor_idx == 34){
                 // if (jaccard > 0.1 && neighbor_idx < 35000){
-                cout << "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
-                    << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
+                
+                
                 neighbor_count++;
-                if (neighbor_count >= 10){
+                if(neighbor_idx == 697508 || neighbor_idx == 524305){
+                    cout <<neighbor_count<< "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
+                    << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
+                }
+                if (neighbor_count > 12){
                     break;
                 }
-                // }
             }
+            std::cout<<"for end\n";
         }
-        cout << endl;
+        std::cout<<"else query\n";
+        // cout << endl;
     }
 
-
+    std::cout<<"Done\n";
     return 0;
 }

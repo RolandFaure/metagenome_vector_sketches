@@ -2,9 +2,17 @@ cmake_minimum_required(VERSION 3.10)
 project(RandomProjectionTools LANGUAGES CXX)
 
 # ==== Compiler and optimization flags ====
+# set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -ffast-math")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O3 -march=native -ffast-math -fno-omit-frame-pointer")
+set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS}")
+
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address,undefined -g -O1 -fno-omit-frame-pointer")
+# set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -fsanitize=address,undefined")
+
+# DISABLE LATER, BAD PRACTICE
+# add_compile_options(-w)
 
 # ==== OpenMP ====
 find_package(OpenMP)
@@ -88,6 +96,14 @@ set_target_properties(pc_mat_cmp_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pc_mat_cmp_lib PUBLIC 
     ${CMAKE_SOURCE_DIR}/bits/include/
     ${CMAKE_SOURCE_DIR}/bits/external/essentials/include/
+    /scratch/mqa6002/software/local/include/
+)
+target_link_directories(pc_mat_cmp_lib PRIVATE 
+    /scratch/mqa6002/software/local/lib/
+)
+target_link_libraries(pc_mat_cmp_lib PUBLIC 
+    BITS
+    streamvbyte
 )
 
 add_executable(query_pc_mat
@@ -100,6 +116,9 @@ add_executable(query_pc_mat_cmp
     src/query_pc_mat.cpp
 )
 # target_link_libraries(query_pc_mat PRIVATE pc_mat_lib)
+target_link_directories(query_pc_mat_cmp PRIVATE
+    /scratch/mqa6002/software/local/lib/
+)
 target_link_libraries(query_pc_mat_cmp PRIVATE pc_mat_cmp_lib)
 
 
@@ -111,16 +130,16 @@ add_custom_target(clean-all
 
 
 # ==== Python bindings ====
-find_package(Python COMPONENTS Interpreter Development REQUIRED)
-find_package(pybind11 CONFIG REQUIRED)  # prefer installed pybind11 config
-# If the above fails, install pybind11 or use the pybind11 header-only fallback.
+# find_package(Python COMPONENTS Interpreter Development REQUIRED)
+# find_package(pybind11 CONFIG REQUIRED)  # prefer installed pybind11 config
+# # If the above fails, install pybind11 or use the pybind11 header-only fallback.
 
-pybind11_add_module(read_pc_mat_module src/bindings.cpp)
-target_link_libraries(read_pc_mat_module PRIVATE pc_mat_lib)
+# pybind11_add_module(read_pc_mat_module src/bindings.cpp)
+# target_link_libraries(read_pc_mat_module PRIVATE pc_mat_lib)
 
-set_target_properties(read_pc_mat_module PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src
-)
+# set_target_properties(read_pc_mat_module PROPERTIES
+#     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src
+# )
 
-# Optionally set optimization flags
-target_compile_options(read_pc_mat_module PRIVATE -O3 -march=native)
+# # Optionally set optimization flags
+# target_compile_options(read_pc_mat_module PRIVATE -O3 -march=native)

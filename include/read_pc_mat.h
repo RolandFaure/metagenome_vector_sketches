@@ -22,6 +22,12 @@ namespace pc_mat{
         vector<uint32_t> neighbor_values; // Check: Should this be int64_t?
     };
 
+    struct Neighbors
+    {
+        std::vector<std::pair<uint32_t, uint16_t>> index_jaccard;
+    };
+    
+
     // Function to decompress zstd files if they exist and track them
     void decompress_zstd_files(const string& folder);
 

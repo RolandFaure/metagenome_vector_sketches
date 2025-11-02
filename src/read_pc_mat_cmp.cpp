@@ -3,6 +3,11 @@
 #include "compact_vector.hpp"
 #include "elias_fano.hpp"
 #include "rice_sequence.hpp"
+#include "streamvbyte.h"
+#include "streamvbytedelta.h"
+
+#include <thread>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
@@ -16,7 +21,7 @@ namespace pc_mat {
     void cleanup_decompressed_files(const string& folder) {
         // Remove decompressed .bin and .txt files, keeping only .zst files
         // string cmd = "cd " + folder + " && rm -f matrix.bin row_index.bin 2>/dev/null || true";
-        string cmd = "cd " + folder + " && rm -f matrix.bin row_index.bin neighbor_start.bin 2>/dev/null || true";
+        string cmd = "cd " + folder + " && rm -f matrix.bin row_index.bin neighbor_start.bin vbyte.bin 2>/dev/null || true";
         system(cmd.c_str());
     }
 
@@ -135,6 +140,38 @@ namespace pc_mat {
         }
         
         return address_of_rows;
+    }
+
+    std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>> get_shard_row_to_address_map_jaccard(const string& shard_folder) {
+        std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t> > row_to_address_map;
+        
+        string index_filename = shard_folder + "/row_index.bin";
+        ifstream index_file(index_filename, ios::binary);
+        
+        if (!index_file) {
+            cerr << "Error: Could not open " << index_filename << endl;
+            return row_to_address_map;
+        }
+        bits::compact_vector row_cv;
+        bits::compact_vector delta_address_cv;
+        row_cv.load(index_file);
+        delta_address_cv.load(index_file);
+
+        // first position is always 0, rest are delta coded
+        uint32_t curr_row = row_cv.access(0);
+        row_to_address_map[curr_row] = std::make_pair(0, 0);
+        uint32_t prev_row = curr_row;
+        
+        for (size_t i = 1; i < row_cv.size(); ++i) {
+            // std::cout<<"Loaded row index "<< i <<": "<< rs_row.access(i)
+            //     <<" address: "<< rs_address.access(i) << std::endl;
+            curr_row = row_cv.access(i);
+            uint64_t curr_add = row_to_address_map[prev_row].second + delta_address_cv.access(i-1);
+            row_to_address_map[curr_row] = std::make_pair(i, curr_add);
+            prev_row = curr_row;
+        }
+        
+        return row_to_address_map;
     }
 
     vector<pair<int, int64_t>> load_shard_row_index_rice(const string& shard_folder) {
@@ -355,17 +392,19 @@ namespace pc_mat {
         // fil_query.close();
         // exit(1);
         vector<NeighborData> results(rows.size());
-
+        int query_count = 0;
         for (const auto& [shard_idx, queries] : shard_to_queries) {
+            
             string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
-            // std::cout<<"Processing shard: "<< shard_folder << std::endl;
+            std::cout<<"Processing shard: "<< shard_folder << std::endl;
 
             // Decompress files in this shard
             decompress_zstd_files(shard_folder);
 
-            // Load the row index for this shard
+            // Load the row index for this shard: can this happen?
             vector<pair<int, int64_t>> address_of_rows = load_shard_row_index_rice(shard_folder);
             if (address_of_rows.empty()) {
+                cerr<<"shard empty addresses\n";
                 // All queries in this shard will be empty
                 for (const auto& [out_idx, _] : queries) {
                     results[out_idx] = NeighborData{};
@@ -374,21 +413,23 @@ namespace pc_mat {
                 cleanup_decompressed_files(shard_folder);
                 continue;
             }
-
+            
             // Get file size to handle the last row
             string bin_filename = shard_folder + "/matrix.bin";
-            ifstream bin_file_size(bin_filename, ios::binary);
-            if (!bin_file_size) {
-                cerr << "Error: Could not open " << bin_filename << endl;
-                for (const auto& [out_idx, _] : queries) {
-                    results[out_idx] = NeighborData{};
-                }
-                cleanup_decompressed_files(shard_folder);
-                continue;
-            }
-            bin_file_size.seekg(0, ios::end);
-            int64_t file_size = bin_file_size.tellg();
-            bin_file_size.close();
+            // ifstream bin_file_size(bin_filename, ios::binary);
+            
+            // if (!bin_file_size) {
+            //     cerr << "Error: Could not open " << bin_filename << endl;
+            //     cerr<<"query size: "<<queries.size()<<" sample row: "<<queries[0].second<<std::endl;
+            //     for (const auto& [out_idx, _] : queries) {
+            //         results[out_idx] = NeighborData{};
+            //     }
+            //     cleanup_decompressed_files(shard_folder);
+            //     continue;
+            // }
+            // bin_file_size.seekg(0, ios::end);
+            // int64_t file_size = bin_file_size.tellg();
+            // bin_file_size.close();
 
             std::string neighbor_fn = shard_folder + "/neighbor_start.bin";
             ifstream ngh_file(neighbor_fn, ios::binary);
@@ -403,6 +444,8 @@ namespace pc_mat {
             }
             uint64_t curr_indx = 0;
             for (const auto& [out_idx, query_row] : queries) {
+                query_count++;
+                std::cout<<query_count<<" "<<out_idx<<": "<<query_row<<": ";
                 NeighborData result;
                 auto it = row_to_addr_idx.find(query_row);
                 if (it == row_to_addr_idx.end()) {
@@ -410,9 +453,9 @@ namespace pc_mat {
                     continue;
                 }
                 size_t addr_idx = it->second;
-                int64_t row_address = address_of_rows[addr_idx].second;
-                // std::cout<<"addr_idx: "<< addr_idx <<" query_row: "<< query_row
-                //     <<" row_address: "<< row_address << std::endl;
+                uint64_t row_address = address_of_rows[addr_idx].second;
+                std::cout<<"addr_idx: "<< addr_idx <<" query_row: "<< query_row
+                    <<" row_address: "<< row_address << std::endl;
 
                 
                 // if (addr_idx + 1 < address_of_rows.size()) {
@@ -425,7 +468,12 @@ namespace pc_mat {
                 //     continue;
                 // }
                 // Read the neighbor data
-                ifstream bin_file(bin_filename, ios::binary);
+                ifstream bin_file;
+                for (int attempt = 0; attempt < 5; ++attempt) {
+                    bin_file.open(bin_filename, ios::binary);
+                    if (bin_file) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }
                 if (!bin_file) {
                     cerr << "Error: Could not open " << bin_filename << " for row " << query_row << endl;
                     results[out_idx] = result;
@@ -439,7 +487,7 @@ namespace pc_mat {
                 rs_values.load(bin_file);
 
                 int32_t number_of_neighbors = rs_values.size();
-                // std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
+                std::cout<<"number_of_neighbors: "<< number_of_neighbors << std::endl;
                 
                 result.neighbor_indices.resize(number_of_neighbors);
                 result.neighbor_values.resize(number_of_neighbors);
@@ -455,12 +503,171 @@ namespace pc_mat {
                     //     <<" value: "<< result.neighbor_values[i] << std::endl;
                 }
                 results[out_idx] = std::move(result);
+                std::cout<<number_of_neighbors<<std::endl;
             }
 
             // Clean up decompressed files for this shard
             cleanup_decompressed_files(shard_folder);
         }
 
+        return results;
+    }
+
+    vector<NeighborData> load_neighbors_for_rows_jaccard(
+        const string& matrix_folder,
+        const vector<int>& rows,
+        int total_vectors,
+        int num_shards
+    ) {
+        // Map from shard index to query index
+        // we will process all queries from the same shard together and go the the next shard
+        unordered_map<int, std::vector<uint32_t> > shard_to_queries;
+        for (uint32_t i = 0; i < rows.size(); ++i) {
+            int shard_idx = get_shard_for_row(rows[i], total_vectors, num_shards);
+            shard_to_queries[shard_idx].emplace_back(i);
+        }
+
+        std::vector<NeighborData> results(rows.size());
+        
+        for(const auto &[shard_idx, query_index_vec]: shard_to_queries){
+            // std::cout<<result_index<<" "<<shard_idx<<std::endl;
+            std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+            decompress_zstd_files(shard_folder);
+            const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map_jaccard(shard_folder);
+            assert(!row_to_indx_add_map.empty());
+            
+            std::string bin_fn = shard_folder + "/matrix.bin";
+            std::ifstream bin_in(bin_fn, std::ios::binary);
+
+            std::string vbyte_fn = shard_folder + "/vbyte.bin";
+            std::ifstream vbyte_in(vbyte_fn, std::ios::binary);
+            bits::compact_vector cv_vb;
+            cv_vb.load(vbyte_in);
+            vbyte_in.close();
+            // std::cout<<"cv loaded, size: "<<cv_vb.size()<<std::endl;
+            for(const uint32_t& query_index: query_index_vec){
+                NeighborData result;
+                uint32_t curr_row = rows[query_index];
+                auto it = row_to_indx_add_map.find(curr_row);
+                if (it == row_to_indx_add_map.end()) {
+                    results[query_index] = result;
+                    continue;
+                }
+                uint32_t curr_query_build_index = it->second.first;
+                uint64_t curr_add = it->second.second;
+                // std::cout<<"cqbi: "<<curr_query_build_index<<" crow: "<<curr_row<<" ca: "<<curr_add<<std::endl;
+                bin_in.clear();
+                bin_in.seekg(curr_add, std::ios::beg);
+                
+                uint16_t top_jaccard;
+                bin_in.read(reinterpret_cast<char*>(&top_jaccard), sizeof(top_jaccard));
+                // std::cout<<"top jaccard: "<<static_cast<uint32_t>(top_jaccard)<<std::endl;
+                bits::rice_sequence<> delta_jaccard_rs;
+                delta_jaccard_rs.load(bin_in);
+
+                uint32_t number_of_neighbors = delta_jaccard_rs.size() + 1; // +1 for the first pos
+                // std::cout<<"#neighbors: "<<number_of_neighbors<<std::endl;
+
+                std::vector<uint8_t> enc_ngh_indx_vec(streamvbyte_max_compressedbytes(number_of_neighbors)); 
+                bin_in.read(reinterpret_cast<char*>(enc_ngh_indx_vec.data()), cv_vb.access(curr_query_build_index));
+                std::vector<uint32_t> ngh_indx_vec(number_of_neighbors);
+                uint64_t bytes_written = streamvbyte_decode(enc_ngh_indx_vec.data(), ngh_indx_vec.data(), number_of_neighbors);
+                // std::cout<<"bw: "<<bytes_written<<" "<<cv_vb.access(curr_query_build_index)<<std::endl;
+                assert(bytes_written == cv_vb.access(curr_query_build_index));
+
+                result.neighbor_indices.resize(number_of_neighbors);
+                result.neighbor_values.resize(number_of_neighbors);
+
+                result.neighbor_indices[0] = ngh_indx_vec[0];
+                result.neighbor_values[0] = top_jaccard;
+
+                for(int i=1; i<number_of_neighbors; i++){
+                    result.neighbor_indices[i] = ngh_indx_vec[i];
+                    result.neighbor_values[i] = result.neighbor_values[i-1] - delta_jaccard_rs.access(i-1);
+                    // std::cout<<result.neighbor_indices[i]<<" "<<result.neighbor_values[i]<<std::endl;
+                }
+                results[query_index] = std::move(result);
+            }
+            cleanup_decompressed_files(shard_folder);
+        }
+        
+        return results;
+    }
+
+    vector<Neighbors> load_neighbors_for_rows_jaccard_wo_sort(
+        const string& matrix_folder,
+        const vector<int>& rows,
+        int total_vectors,
+        int num_shards
+    ) {
+        // Map from shard index to query index
+        // we will process all queries from the same shard together and go the the next shard
+        unordered_map<int, std::vector<uint32_t> > shard_to_queries;
+        for (uint32_t i = 0; i < rows.size(); ++i) {
+            int shard_idx = get_shard_for_row(rows[i], total_vectors, num_shards);
+            shard_to_queries[shard_idx].emplace_back(i);
+        }
+
+        // std::vector<NeighborData> results(rows.size());
+        std::vector<Neighbors> results(rows.size());
+        
+        for(const auto &[shard_idx, query_index_vec]: shard_to_queries){
+            // std::cout<<result_index<<" "<<shard_idx<<std::endl;
+            std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+            decompress_zstd_files(shard_folder);
+            const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map_jaccard(shard_folder);
+            assert(!row_to_indx_add_map.empty());
+            
+            std::string bin_fn = shard_folder + "/matrix.bin";
+            std::ifstream bin_in(bin_fn, std::ios::binary);
+
+            std::string ngh_fn = shard_folder + "/neighbor_start.bin";
+            std::ifstream ngh_in(ngh_fn, std::ios::binary);
+            bits::rice_sequence<> rs_start;
+            rs_start.load(ngh_in);
+            ngh_in.close();
+            // std::cout<<"cv loaded, size: "<<cv_vb.size()<<std::endl;
+            for(const uint32_t& query_index: query_index_vec){
+                Neighbors result;
+                uint32_t curr_row = rows[query_index];
+                auto it = row_to_indx_add_map.find(curr_row);
+                if (it == row_to_indx_add_map.end()) {
+                    results[query_index] = result;
+                    continue;
+                }
+                uint32_t curr_query_build_index = it->second.first;
+                uint64_t curr_add = it->second.second;
+                // std::cout<<"cqbi: "<<curr_query_build_index<<" crow: "<<curr_row<<" ca: "<<curr_add<<std::endl;
+                bin_in.clear();
+                bin_in.seekg(curr_add, std::ios::beg);
+
+                bits::rice_sequence<> rs_delta;
+                rs_delta.load(bin_in);
+                uint32_t number_of_neighbors = rs_delta.size() + 1;
+                
+                bits::compact_vector cv_jc;
+                cv_jc.load(bin_in);
+                
+                // result.neighbor_indices.resize(number_of_neighbors);
+                // result.neighbor_values.resize(number_of_neighbors);
+                result.index_jaccard.resize(number_of_neighbors);
+                
+                result.index_jaccard[0] = std::make_pair(rs_start.access(curr_query_build_index), 
+                                                cv_jc.access(0));
+                // result.neighbor_indices[0] = rs_start.access(curr_query_build_index);
+                // result.neighbor_values[0] = cv_jc.access(0);
+
+                for(int i=1; i<number_of_neighbors; i++){
+                    result.index_jaccard[i] = std::make_pair(result.index_jaccard[i-1].first 
+                                + rs_delta.access(i-1), cv_jc.access(i));
+                    // result.neighbor_indices[i] = result.neighbor_indices[i-1] + rs_delta.access(i-1);
+                    // result.neighbor_values[i] = cv_jc.access(i);
+                    // std::cout<<result.neighbor_indices[i]<<" "<<result.neighbor_values[i]<<std::endl;
+                }
+                results[query_index] = std::move(result);
+            }
+            cleanup_decompressed_files(shard_folder);
+        }
         return results;
     }
 
@@ -759,7 +966,7 @@ namespace pc_mat {
         return index_to_neighbors;
     }
 
-    vector<Result> query(string matrix_folder, string query_file){
+    vector<Result> query_rice(string matrix_folder, string query_file){
         vector<string> query_ids_str;
         bool read_from_stdin = false;
         bool show_help = false;
@@ -832,10 +1039,13 @@ namespace pc_mat {
         // vector<NeighborData> all_neighbors = load_neighbors_for_rows(matrix_folder, queries, total_vectors, num_shards);
         vector<NeighborData> all_neighbors = load_neighbors_for_rows_rice(matrix_folder, queries, 
             total_vectors, num_shards);
-
+        std::cout<<"Neighbor loaded\n";
         vector<Result> all_results(queries.size());
+        std::cout<<all_results.size()<<" "<< queries[0]<<std::endl;
         for (size_t q = 0; q < queries.size(); ++q) {
+            std::cout<<q<<std::endl;
             int query_row = queries[q];
+            std::cout<<q<<" "<<query_row;
             // cout << "Query: " << query_row << " (" << identifiers[query_row] << ")" << endl;
 
             if (query_row < 0 || query_row >= total_vectors) {
@@ -887,7 +1097,228 @@ namespace pc_mat {
                 }
                 all_results[q] = std::move(res);
             }
+            std::cout<<" : "<<neighbors.neighbor_indices.size()<<std::endl;
             // cout << endl;
+        }
+        return all_results;
+    }
+
+    vector<Result> query(string matrix_folder, string query_file){
+        vector<string> query_ids_str;
+        bool read_from_stdin = false;
+        bool show_help = false;
+
+        if (matrix_folder.empty()) {
+            cerr << "Error: --matrix_folder is required" << endl;
+        }
+
+        if (!fs::exists(matrix_folder)) {
+            cerr << "Error: Matrix folder does not exist: " << matrix_folder << endl;
+        }
+
+        // Ensure matrix_folder ends with '/'
+        if (!matrix_folder.empty() && matrix_folder.back() != '/' && matrix_folder.back() != '\\') {
+            matrix_folder += '/';
+        }
+
+        // Load vector identifiers and create mapping
+        vector<string> identifiers;
+        unordered_map<string, int> id_to_index = load_vector_identifiers(matrix_folder, identifiers);
+
+        vector<float> vector_norms;
+        load_vector_norms(matrix_folder, vector_norms);
+        
+        int total_vectors = identifiers.size();
+        std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;
+        if (total_vectors <= 0) {
+            cerr << "Error: Could not determine total number of vectors" << endl;
+        }
+
+        // Discover number of shards
+        int num_shards = discover_shards(matrix_folder);
+        // num_shards = 100;
+        // int num_shards = 1000;
+        // cout << "DEBUG NUM SHASS" << endl;
+        if (num_shards <= 0) {
+            cerr << "Error: No shard folders found in " << matrix_folder << endl;
+        }
+
+        // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
+
+        // auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
+        // exit(0);
+
+        const double MULT_CONST = (1ULL << 10) - 1;
+
+        // Determine queries
+        vector<int> queries;
+        
+        if (read_from_stdin) {
+            queries = read_queries_from_stdin(id_to_index);
+        } else if (!query_file.empty()) {
+            queries = read_queries_from_file(query_file, id_to_index);
+        } else if (!query_ids_str.empty()) {
+            // Convert command line query IDs
+            for (const string& query_str : query_ids_str) {
+                int index = parse_query_to_index(query_str, id_to_index);
+                if (index >= 0) {
+                    queries.push_back(index);
+                }
+            }
+        } else {
+            cerr << "Error: No queries specified. Use --query_file, --query_ids, or --stdin" << endl;
+        }
+
+        if (queries.empty()) {
+            cerr << "Error: No valid queries found" << endl;
+        }
+
+        // Query all at once using load_neighbors_for_rows
+        // vector<NeighborData> all_neighbors = load_neighbors_for_rows(matrix_folder, queries, total_vectors, num_shards);
+        vector<Neighbors> all_neighbors = load_neighbors_for_rows_jaccard_wo_sort(matrix_folder, queries, 
+            total_vectors, num_shards);
+
+        vector<Result> all_results(queries.size());
+        for (size_t q = 0; q < queries.size(); ++q) {
+            int query_row = queries[q];
+            // cout << "Query: " << query_row << " (" << identifiers[query_row] << ")" << endl;
+
+            if (query_row < 0 || query_row >= total_vectors) {
+                cout << "  Error: Query row " << query_row << " is out of range [0, " << total_vectors << ")" << endl;
+                continue;
+            }
+
+            Neighbors& neighbors = all_neighbors[q];
+
+
+            if (neighbors.index_jaccard.empty()) {
+                // cout << "  No neighbors found" << endl;
+            } 
+            else {
+                sort(neighbors.index_jaccard.begin(), neighbors.index_jaccard.end(), 
+                        [] (const std::pair<uint32_t, uint16_t>& a, const std::pair<uint32_t, uint16_t>& b) {
+                    return a.second > b.second;
+                });
+                Result res;
+                res.self_id = identifiers[query_row];
+                for(int n=0; n<neighbors.index_jaccard.size(); n++){
+                    uint32_t neighbor_idx = neighbors.index_jaccard[n].first;
+                    uint16_t neighbor_jaccard = neighbors.index_jaccard[n].second;
+
+                    std::string neighbor_id = (neighbor_idx < total_vectors) ? 
+                                    identifiers[neighbor_idx] : "UNKNOWN";
+                    res.neighbor_ids.push_back(neighbor_id);
+                    res.jaccard_similarities.push_back(static_cast<double>(neighbor_jaccard)/MULT_CONST);
+                }
+                all_results[q] = std::move(res);
+            }
+        }
+        return all_results;
+    }
+
+    vector<Result> query_sorted(string matrix_folder, string query_file){
+        vector<string> query_ids_str;
+        bool read_from_stdin = false;
+        bool show_help = false;
+
+        if (matrix_folder.empty()) {
+            cerr << "Error: --matrix_folder is required" << endl;
+        }
+
+        if (!fs::exists(matrix_folder)) {
+            cerr << "Error: Matrix folder does not exist: " << matrix_folder << endl;
+        }
+
+        // Ensure matrix_folder ends with '/'
+        if (!matrix_folder.empty() && matrix_folder.back() != '/' && matrix_folder.back() != '\\') {
+            matrix_folder += '/';
+        }
+
+        // Load vector identifiers and create mapping
+        vector<string> identifiers;
+        unordered_map<string, int> id_to_index = load_vector_identifiers(matrix_folder, identifiers);
+
+        vector<float> vector_norms;
+        load_vector_norms(matrix_folder, vector_norms);
+        
+        int total_vectors = identifiers.size();
+        std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;
+        if (total_vectors <= 0) {
+            cerr << "Error: Could not determine total number of vectors" << endl;
+        }
+
+        // Discover number of shards
+        int num_shards = discover_shards(matrix_folder);
+        // num_shards = 100;
+        // int num_shards = 1000;
+        // cout << "DEBUG NUM SHASS" << endl;
+        if (num_shards <= 0) {
+            cerr << "Error: No shard folders found in " << matrix_folder << endl;
+        }
+
+        // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
+
+        // auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
+        // exit(0);
+
+        const double MULT_CONST = (1ULL << 16) - 1;
+
+        // Determine queries
+        vector<int> queries;
+        
+        if (read_from_stdin) {
+            queries = read_queries_from_stdin(id_to_index);
+        } else if (!query_file.empty()) {
+            queries = read_queries_from_file(query_file, id_to_index);
+        } else if (!query_ids_str.empty()) {
+            // Convert command line query IDs
+            for (const string& query_str : query_ids_str) {
+                int index = parse_query_to_index(query_str, id_to_index);
+                if (index >= 0) {
+                    queries.push_back(index);
+                }
+            }
+        } else {
+            cerr << "Error: No queries specified. Use --query_file, --query_ids, or --stdin" << endl;
+        }
+
+        if (queries.empty()) {
+            cerr << "Error: No valid queries found" << endl;
+        }
+
+        // Query all at once using load_neighbors_for_rows
+        // vector<NeighborData> all_neighbors = load_neighbors_for_rows(matrix_folder, queries, total_vectors, num_shards);
+        vector<NeighborData> all_neighbors = load_neighbors_for_rows_jaccard(matrix_folder, queries, 
+            total_vectors, num_shards);
+
+        vector<Result> all_results(queries.size());
+        for (size_t q = 0; q < queries.size(); ++q) {
+            int query_row = queries[q];
+            // cout << "Query: " << query_row << " (" << identifiers[query_row] << ")" << endl;
+
+            if (query_row < 0 || query_row >= total_vectors) {
+                cout << "  Error: Query row " << query_row << " is out of range [0, " << total_vectors << ")" << endl;
+                continue;
+            }
+
+            const NeighborData& neighbors = all_neighbors[q];
+
+            if (neighbors.neighbor_indices.empty()) {
+                // cout << "  No neighbors found" << endl;
+            } 
+            else {
+                Result res;
+                res.self_id = identifiers[query_row];
+                for(int n=0; n<neighbors.neighbor_indices.size(); n++){
+                    uint32_t neighbor_idx = neighbors.neighbor_indices[n];
+                    uint16_t neighbor_jaccard = neighbors.neighbor_values[n];
+
+                    std::string neighbor_id = (neighbor_idx < total_vectors) ? identifiers[neighbor_idx] : "UNKNOWN";
+                    res.neighbor_ids.push_back(neighbor_id);
+                    res.jaccard_similarities.push_back(static_cast<double>(neighbor_jaccard)/MULT_CONST);
+                }
+                all_results[q] = std::move(res);
+            }
         }
         return all_results;
     }
