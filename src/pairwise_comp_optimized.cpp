@@ -734,18 +734,20 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
     const double MULT_CONST = (1ULL << 10) - 1;
     // unordered_map<int, std::pair<vector<int>,vector<uint32_t>>> reorganized_results;
     unordered_map<uint32_t, std::vector<std::pair<uint32_t, uint16_t> > >reorganized_results;
-    
+    std::ofstream jac_os("jaccards.txt");
     for (const auto& [row, col, value] : results) {
-        if(row == col) continue;
+        // if(row == col) continue;
         double norm_curr = all_norms_vec[row];
         double norm_col = all_norms_vec[col];
         double inter_col = static_cast<double>(value)/dimension;
         double jaccard = inter_col / (norm_curr + norm_col - inter_col);
-        // if(row == 32 || row == 12){
-        //     std::cout<<"is: "<<inter_col<<" ns: "<<norm_curr<<" nn: "<<norm_col<<" jac: "<<jaccard<<std::endl;
-        // }
         if(jaccard > 1) jaccard = 1;
         uint16_t quantized_jaccard = static_cast<uint16_t>(round(jaccard * MULT_CONST));
+        if(row == 9599){
+            jac_os<<"is: "<<inter_col<<" ns: "<<norm_curr<<" nn: "<<norm_col
+                <<" jac: "<<jaccard<<" qj: "<<quantized_jaccard
+                <<std::endl;
+        }
         reorganized_results[row].push_back(std::make_pair(col, quantized_jaccard));
     }
 
@@ -762,7 +764,7 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
     std::vector<uint32_t> row_vec(reorganized_results.size());
     std::vector<uint64_t> curr_pos_vec(reorganized_results.size());
     std::vector<uint32_t> start_neighbor(reorganized_results.size());
-    std::vector<uint64_t> bytes_written_vec(reorganized_results.size());
+    // std::vector<uint64_t> bytes_written_vec(reorganized_results.size());
 
     
     // std::ofstream temp_out("space_usage.txt");
@@ -780,7 +782,7 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         neighbor_indx_vec.reserve(neighbor_pair_vec.size());
         neighbor_jaccard_vec.reserve(neighbor_pair_vec.size());
 
-         for (auto& [idx, j] : neighbor_pair_vec) {
+        for (auto& [idx, j] : neighbor_pair_vec) {
             neighbor_indx_vec.push_back(idx);
             neighbor_jaccard_vec.push_back(j);
         }
@@ -799,9 +801,9 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
         row_vec[indx] = row;
         curr_pos_vec[indx] = current_pos;
-
-        // start_neighbor[indx++] = neighbor_indx_vec[0];
-        start_neighbor[indx] = neighbor_indx_vec[0]; //FIXME: indx++ if not vbyte
+    
+        start_neighbor[indx++] = neighbor_indx_vec[0];
+        // start_neighbor[indx] = neighbor_indx_vec[0]; //FIXME: indx++ if not vbyte
         
         std::vector<uint32_t> delta_cols(neighbor_indx_vec.size()-1);
         for (size_t k = 1; k < neighbor_indx_vec.size(); ++k) {
@@ -809,20 +811,26 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
             delta_cols[k-1] = neighbor_indx_vec[k] - neighbor_indx_vec[k-1];
         }
 
-        // bits::rice_sequence<> rs_delta;
-        // rs_delta.encode(delta_cols.begin(), delta_cols.size());
-        // rs_delta.save(bin_out);
+        bits::rice_sequence<> rs_delta;
+        rs_delta.encode(delta_cols.begin(), delta_cols.size());
+        rs_delta.save(bin_out);
 
-        std::vector<uint8_t> enc_delta(streamvbyte_max_compressedbytes(delta_cols.size()));
-        uint64_t bytes_written = streamvbyte_encode(delta_cols.data(), delta_cols.size(), 
-                    enc_delta.data());
-        bytes_written_vec[indx++] = bytes_written;
-        bin_out.write(reinterpret_cast<const char*>(enc_delta.data()), bytes_written);  
+        // std::vector<uint8_t> enc_delta(streamvbyte_max_compressedbytes(delta_cols.size()));
+        // uint64_t bytes_written = streamvbyte_encode(delta_cols.data(), delta_cols.size(), 
+        //             enc_delta.data());
+        // bytes_written_vec[indx++] = bytes_written;
+        // bin_out.write(reinterpret_cast<const char*>(enc_delta.data()), bytes_written);  
 
         
         bits::compact_vector cv_jc;
         cv_jc.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
         cv_jc.save(bin_out);
+
+        if(row == 9599){
+            std::cout<<row<<" "<<current_pos
+                <<" "<<rs_delta.size()+1<<" "<<neighbor_indx_vec.size()<<" "<< neighbor_indx_vec[0]
+            <<std::endl;
+        }
 
         // bits::rice_sequence<> rs_jac;
         // rs_jac.encode(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
@@ -832,8 +840,8 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         // jac_space += rs_jac.num_bytes();
         // ngh_space += bytes_written;
         // ngh_space += ngh_rs.num_bytes();
-        // ngh_space += rs_delta.num_bytes();
-        ngh_space += bytes_written;
+        ngh_space += rs_delta.num_bytes();
+        // ngh_space += bytes_written;
         
     }
     bin_out.flush();     
@@ -866,13 +874,13 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
     ngh_out.close();
     ngh_space += rs_start.num_bytes();
 
-    std::string vbyte_fn = folder + "vbyte.bin";
-    std::ofstream vbyte_out(vbyte_fn, std::ios::binary);
-    bits::compact_vector cv_vb; // Compact Vector Variable Byte written
-    cv_vb.build(bytes_written_vec.begin(), bytes_written_vec.size());
-    cv_vb.save(vbyte_out);
-    vbyte_out.close();
-    ngh_space += cv_vb.num_bytes();
+    // std::string vbyte_fn = folder + "vbyte.bin";
+    // std::ofstream vbyte_out(vbyte_fn, std::ios::binary);
+    // bits::compact_vector cv_vb; // Compact Vector Variable Byte written
+    // cv_vb.build(bytes_written_vec.begin(), bytes_written_vec.size());
+    // cv_vb.save(vbyte_out);
+    // vbyte_out.close();
+    // ngh_space += cv_vb.num_bytes();
 
     // std::string vbyte_fn = folder + "vbyte.bin";
     // std::ofstream vbyte_out(vbyte_fn, std::ios::binary);
@@ -1147,6 +1155,9 @@ int main(int argc, char* argv[]) {
     int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
     int begin_row = shard_idx * rows_per_shard;
     int end_row = min(begin_row + rows_per_shard, total_vectors);
+
+    begin_row = 9599;
+    end_row = begin_row + 2;
 
     cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row << endl;
 

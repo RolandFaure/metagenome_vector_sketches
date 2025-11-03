@@ -612,7 +612,7 @@ namespace pc_mat {
         std::vector<Neighbors> results(rows.size());
         
         for(const auto &[shard_idx, query_index_vec]: shard_to_queries){
-            // std::cout<<result_index<<" "<<shard_idx<<std::endl;
+            std::cout<<"shard: "<<shard_idx<<std::endl;
             std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
             decompress_zstd_files(shard_folder);
             const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map_jaccard(shard_folder);
@@ -637,7 +637,7 @@ namespace pc_mat {
                 }
                 uint32_t curr_query_build_index = it->second.first;
                 uint64_t curr_add = it->second.second;
-                // std::cout<<"cqbi: "<<curr_query_build_index<<" crow: "<<curr_row<<" ca: "<<curr_add<<std::endl;
+                std::cout<<"cqbi: "<<curr_query_build_index<<" crow: "<<curr_row<<" ca: "<<curr_add<<std::endl;
                 bin_in.clear();
                 bin_in.seekg(curr_add, std::ios::beg);
 
@@ -662,7 +662,8 @@ namespace pc_mat {
                                 + rs_delta.access(i-1), cv_jc.access(i));
                     // result.neighbor_indices[i] = result.neighbor_indices[i-1] + rs_delta.access(i-1);
                     // result.neighbor_values[i] = cv_jc.access(i);
-                    // std::cout<<result.neighbor_indices[i]<<" "<<result.neighbor_values[i]<<std::endl;
+                    if(i < 10)
+                        std::cout<<result.index_jaccard[i].first<<" "<<result.index_jaccard[i].second<<std::endl;
                 }
                 results[query_index] = std::move(result);
             }
@@ -966,7 +967,7 @@ namespace pc_mat {
         return index_to_neighbors;
     }
 
-    vector<Result> query_rice(string matrix_folder, string query_file){
+    vector<Result> query(string matrix_folder, string query_file){
         vector<string> query_ids_str;
         bool read_from_stdin = false;
         bool show_help = false;
@@ -1103,7 +1104,7 @@ namespace pc_mat {
         return all_results;
     }
 
-    vector<Result> query(string matrix_folder, string query_file){
+    vector<Result> query_ja_wo_sort(string matrix_folder, string query_file){
         vector<string> query_ids_str;
         bool read_from_stdin = false;
         bool show_help = false;
@@ -1135,15 +1136,15 @@ namespace pc_mat {
         }
 
         // Discover number of shards
-        int num_shards = discover_shards(matrix_folder);
+        // int num_shards = discover_shards(matrix_folder);
         // num_shards = 100;
-        // int num_shards = 1000;
+        int num_shards = 1000;
         // cout << "DEBUG NUM SHASS" << endl;
         if (num_shards <= 0) {
             cerr << "Error: No shard folders found in " << matrix_folder << endl;
         }
 
-        // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
+        cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
 
         // auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
         // exit(0);
@@ -1201,7 +1202,7 @@ namespace pc_mat {
                 });
                 Result res;
                 res.self_id = identifiers[query_row];
-                for(int n=0; n<neighbors.index_jaccard.size(); n++){
+                for(size_t n=0; n<neighbors.index_jaccard.size(); n++){
                     uint32_t neighbor_idx = neighbors.index_jaccard[n].first;
                     uint16_t neighbor_jaccard = neighbors.index_jaccard[n].second;
 
@@ -1209,6 +1210,8 @@ namespace pc_mat {
                                     identifiers[neighbor_idx] : "UNKNOWN";
                     res.neighbor_ids.push_back(neighbor_id);
                     res.jaccard_similarities.push_back(static_cast<double>(neighbor_jaccard)/MULT_CONST);
+                    if(n < 10)
+                        std::cout<<neighbor_jaccard<<" "<<static_cast<double>(neighbor_jaccard)/MULT_CONST<<std::endl;
                 }
                 all_results[q] = std::move(res);
             }
