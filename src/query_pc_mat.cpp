@@ -8,6 +8,7 @@ int main(int argc, char* argv[]) {
     // Command line arguments
     string matrix_folder;
     string query_file;
+    uint32_t top_n = 10;
     vector<string> query_ids_str;
     bool read_from_stdin = false;
     bool show_help = false;
@@ -19,6 +20,7 @@ int main(int argc, char* argv[]) {
             (clipp::option("--query_ids") & clipp::values("ids", query_ids_str)) |
             clipp::option("--stdin").set(read_from_stdin)
         ),
+        clipp::option("--top") & clipp::value("ids", top_n),
         clipp::option("--help").set(show_help)
     );
 
@@ -30,6 +32,7 @@ int main(int argc, char* argv[]) {
         cout << "  --query_file     File containing query IDs (one per line)\n";
         cout << "  --query_ids      Query IDs as command line arguments (numeric indices or identifiers)\n";
         cout << "  --stdin          Read query IDs from standard input\n";
+        cout << "  --top           Number of top jaccard values to show\n\n";
         cout << "  --help           Show this help message\n\n";
         cout << "Examples:\n";
         cout << "  " << argv[0] << " --matrix_folder ./results --query_ids 10 25 42\n";
@@ -50,7 +53,7 @@ int main(int argc, char* argv[]) {
         const pc_mat::Result& res = all_results[i];
         std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
         log_file <<res.self_id << " "<<res.neighbor_ids.size()<< std::endl;
-        int64_t num_neighbors_to_show = std::min<int64_t>(10, res.neighbor_ids.size());
+        int64_t num_neighbors_to_show = std::min<int64_t>(top_n, res.neighbor_ids.size());
         std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
         for (size_t j = 0; j < num_neighbors_to_show; ++j) {
             std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
