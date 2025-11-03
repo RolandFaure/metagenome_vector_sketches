@@ -8,6 +8,7 @@ int main(int argc, char* argv[]) {
     // Command line arguments
     string matrix_folder;
     string query_file;
+    string neighbor_fn = "neighbors.txt";
     uint32_t top_n = 10;
     vector<string> query_ids_str;
     bool read_from_stdin = false;
@@ -21,6 +22,7 @@ int main(int argc, char* argv[]) {
             clipp::option("--stdin").set(read_from_stdin)
         ),
         clipp::option("--top") & clipp::value("ids", top_n),
+        clipp::option("--write_to_file") & clipp::value("file", neighbor_fn),
         clipp::option("--help").set(show_help)
     );
 
@@ -32,7 +34,8 @@ int main(int argc, char* argv[]) {
         cout << "  --query_file     File containing query IDs (one per line)\n";
         cout << "  --query_ids      Query IDs as command line arguments (numeric indices or identifiers)\n";
         cout << "  --stdin          Read query IDs from standard input\n";
-        cout << "  --top           Number of top jaccard values to show\n\n";
+        cout << "  --top           Number of top jaccard values to show\n";
+        cout << "  --write_to_file  Write neighbor results to file\n";
         cout << "  --help           Show this help message\n\n";
         cout << "Examples:\n";
         cout << "  " << argv[0] << " --matrix_folder ./results --query_ids 10 25 42\n";
@@ -46,17 +49,22 @@ int main(int argc, char* argv[]) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end - start;
     std::cout << "Query completed in " << elapsed.count() << " seconds.\n" << std::endl;
-
+    
     for(int i=0; i< all_results.size(); i++){
+        std::string nfn = "query_"+std::to_string(i+1)+"_"+neighbor_fn;
+        std::ofstream out(nfn.c_str());
         const pc_mat::Result& res = all_results[i];
         std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
         int64_t num_neighbors_to_show = std::min<int64_t>(top_n, res.neighbor_ids.size());
         std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
+        out<<"ID Jaccard\n";
         for (size_t j = 0; j < num_neighbors_to_show; ++j) {
             std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
                  << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
+            out<<res.neighbor_ids[j]<<" "<<res.jaccard_similarities[j]<<std::endl;
         }
         std::cout << std::endl;
+        out.close();
     }
     return 0;
 }
