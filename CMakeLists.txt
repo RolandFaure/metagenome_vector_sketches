@@ -68,7 +68,7 @@ target_include_directories(pc_mat_cmp_lib PUBLIC
 add_executable(query_pc_mat
     src/query_pc_mat.cpp
 )
-target_link_libraries(query_pc_mat PRIVATE pc_mat_cmp_lib)
+target_link_libraries(query_pc_mat PRIVATE pc_mat_lib)
 
 # ==== Link libraries ====
 # Only pairwise_comp_optimized depends on the BITS library
