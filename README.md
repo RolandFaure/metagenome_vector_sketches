@@ -52,7 +52,7 @@ Then, to query using `query_pc_mat`:
 ../build/query_ava_matrix --matrix_folder toy_index/ --query_file query_strs.txt
 ``` -->
 ``` shell
-../build/query_pc_mat --matrix_folder toy_index/ --query_file query_strs.txt
+../build/query_pc_mat --matrix_folder toy_index/ --query_file query_strs.txt --top 20
 ```
 
 To use python interface:
