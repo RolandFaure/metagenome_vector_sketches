@@ -5,12 +5,13 @@ Repository with code to sketch genomic data with random projection
 
 ``` shell
 git clone --recursive https://github.com/RolandFaure/metagenome_vector_sketches.git
+cd metagenome_vector_sketches
 git submodule update --init --recursive
 
 conda create -n faiss_env python=3.12
 conda activate faiss_env
 conda install -c pytorch faiss-cpu
-conda install -c conda-forge pybind11 scipy matplotlib
+conda install -c conda-forge pybind11 scipy matplotlib pandas
 
 cd metagenome_vector_sketches
 mkdir build
@@ -54,10 +55,37 @@ Then, to query using `query_pc_mat`:
 ``` shell
 ../build/query_pc_mat --matrix_folder toy_index/ --query_file query_strs.txt --top 20 --write_to_file --show_all
 ```
+If you want to use a row and col file for getting a sliced matrix:
+
+``` shell
+../build/query_pc_mat --matrix_folder toy_index/ --row_file row_file.txt --col_file col_file.txt --write_to_file
+```
+
 
 To use python interface:
 
 ```shell
-python3 ../src/read_pc_mat.py toy_index query_strs.txt
+python3 ../src/read_pc_mat.py --matrix_folder toy_index --query_file query_strs.txt
 
+```
+Or to use a row and col file:
+
+```shell
+python3 ../src/read_pc_mat.py --matrix_folder toy_index --row_file row_file.txt --col_file col_file.txt
+
+```
+
+```
+Usage
+
+Pairwise Comparison Matrix Search
+
+options:
+  -h, --help            show this help message and exit
+  --matrix_folder MATRIX_FOLDER
+                        Folder containing matrix data
+  --query_file QUERY_FILE
+                        File with query IDs (one ID per line)
+  --row_file ROW_FILE   File containing row IDs (one ID per line)
+  --col_file COL_FILE   File containing column IDs (one ID per line)
 ```

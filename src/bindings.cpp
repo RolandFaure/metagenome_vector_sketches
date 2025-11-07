@@ -57,8 +57,45 @@ py::list query_py(std::string matrix_folder, std::string query_file) {
     return all_results;
 }
 
+py::dict query_sliced_py(std::string matrix_folder, std::string row_file, std::string col_file) {
+    std::vector<std::string> row_vec, col_vec; // just a placeholder for now
+    std::vector<std::vector<float>> results = pc_mat::query_sliced(matrix_folder, row_file, col_file, row_vec, col_vec);
+    
+    py::list row_list, col_list;
+    for(const auto& row: row_vec) row_list.append(row);
+    for(const auto& col: col_vec) col_list.append(col);
+    
+    py::dict jaccard_dict;
+    for(size_t i=0; i<results.size(); i++){
+        py::list jaccard_list;
+        std::string row = row_vec[i];
+        for(size_t j=0; j<results[i].size(); j++){
+            jaccard_list.append(results[i][j]);
+        }
+        jaccard_dict[row.c_str()] = jaccard_list;
+    }
+    
+    py::dict final_result;
+    final_result["row-list"] = row_list;
+    final_result["col-list"] = col_list;
+    final_result["jac-dict"] = jaccard_dict;
+    return final_result;
+}
+
 PYBIND11_MODULE(read_pc_mat_module, m) {
     m.doc() = "Module for querying pairwise comparison matrix";
-    m.def("query", &query_py, py::arg("matrix_folder"), py::arg("query_file"),
-          "Compute neighbors for queries in the given matrix folder and query file / ids; returns a list of dictionaries with neighbor IDs and Jaccard similarities.");
+    
+    m.def("query", 
+        &query_py, 
+        py::arg("matrix_folder"), py::arg("query_file"),
+        "Compute neighbors for queries in the given matrix folder and query file / ids;"
+        " returns a list of dictionaries with neighbor IDs and jaccard similarities."
+    );
+
+    m.def("query_sliced",
+        &query_sliced_py, 
+        py::arg("matrix_folder"), py::arg("row_file"), py::arg("col_file"),
+        "Compute neighbors for queries in the given matrix folder and from the corresponding row-col files;"
+        " returns a dictionary containing row, col IDS and their corresponding jaccard similarities."
+    );
 }

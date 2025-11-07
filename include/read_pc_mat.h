@@ -65,7 +65,8 @@ namespace pc_mat{
     int parse_query_to_index(const string& query_str, const unordered_map<string, int>& id_to_index) ;
 
     // Read queries from file
-    vector<int> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index) ;
+    vector<int> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index,
+                std::vector<std::string>& id_vec) ;
 
     // Read queries from stdin
     vector<int> read_queries_from_stdin(const unordered_map<string, int>& id_to_index) ;
@@ -92,4 +93,6 @@ namespace pc_mat{
     };
 
     vector<Result> query(string matrix_folder, string query_file, std::vector<string>& query_ids_str);
+    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::string row_file, std::string col_file,
+                    std::vector<std::string>& row_vec, std::vector<std::string>& col_vec);
 } // namespace pc_mat

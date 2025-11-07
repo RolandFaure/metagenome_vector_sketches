@@ -276,7 +276,8 @@ namespace pc_mat {
     }
 
     // Read queries from file
-    vector<int> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index) {
+    vector<int> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index,
+            std::vector<std::string>& id_vec) {
         vector<int> queries;
         ifstream file(filename);
         
@@ -297,6 +298,10 @@ namespace pc_mat {
             int index = parse_query_to_index(line, id_to_index);
             if (index >= 0) {
                 queries.push_back(index);
+                id_vec.push_back(line);
+            }
+            else{
+                // id_vec.push_back("UNKNOWN");
             }
         }
         
@@ -472,11 +477,12 @@ namespace pc_mat {
 
         // Determine queries
         vector<int> queries;
+        std::vector<std::string> query_id_vec;
         
         if (read_from_stdin) {
             queries = read_queries_from_stdin(id_to_index);
         } else if (!query_file.empty()) {
-            queries = read_queries_from_file(query_file, id_to_index);
+            queries = read_queries_from_file(query_file, id_to_index, query_id_vec);
         } else if (!query_ids_str.empty()) {
             // Convert command line query IDs
             for (const string& query_str : query_ids_str) {
