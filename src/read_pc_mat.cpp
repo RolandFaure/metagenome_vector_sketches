@@ -269,6 +269,168 @@ namespace pc_mat {
         return results;
     }
 
+    vector<std::vector<int64_t> > load_neighbors_for_slice(
+        const string& matrix_folder,
+        const vector<int>& rows,
+        const vector<int>& cols,
+        int total_vectors,
+        int num_shards
+    ) {
+        // Map from shard index to vector of (input index, row)
+        unordered_map<int, vector<pair<size_t, int>>> shard_to_queries;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            int shard_idx = get_shard_for_row(rows[i], total_vectors, num_shards);
+            shard_to_queries[shard_idx].emplace_back(i, rows[i]);
+        }
+
+        // vector<NeighborData> results(rows.size());
+        std::vector<std::vector<int64_t> >results(rows.size());
+
+        for (const auto& [shard_idx, queries] : shard_to_queries) {
+            string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
+
+            // Decompress files in this shard
+            decompress_zstd_files(shard_folder);
+
+            // Load the row index for this shard
+            vector<pair<int, int64_t>> address_of_rows = load_shard_row_index(shard_folder);
+            if (address_of_rows.empty()) {
+                // All queries in this shard will be empty
+                for (const auto& [out_idx, _] : queries) {
+                    std::vector<int64_t> result;
+                    results[out_idx] = std::move(result);
+                }
+                // Clean up and continue
+                cleanup_decompressed_files(shard_folder);
+                continue;
+            }
+
+            // Get file size to handle the last row
+            string bin_filename = shard_folder + "/matrix.bin";
+            ifstream bin_file_size(bin_filename, ios::binary);
+            if (!bin_file_size) {
+                cerr << "Error: Could not open " << bin_filename << endl;
+                for (const auto& [out_idx, _] : queries) {
+                    std::vector<int64_t> result;
+                    results[out_idx] = std::move(result);
+                }
+                cleanup_decompressed_files(shard_folder);
+                continue;
+            }
+            bin_file_size.seekg(0, ios::end);
+            int64_t file_size = bin_file_size.tellg();
+            bin_file_size.close();
+
+            // Build a map from row to address index for fast lookup
+            unordered_map<int, size_t> row_to_addr_idx;
+            for (size_t i = 0; i < address_of_rows.size(); ++i) {
+                row_to_addr_idx[address_of_rows[i].first] = i;
+            }
+
+            for (const auto& [out_idx, query_row] : queries) {
+                std::vector<int64_t> result;
+                auto it = row_to_addr_idx.find(query_row);
+                if (it == row_to_addr_idx.end()) {
+                    results[out_idx] = std::move(result);
+                    continue;
+                }
+                size_t addr_idx = it->second;
+                int64_t row_address = address_of_rows[addr_idx].second;
+
+                int number_of_neighbors = 0;
+                if (addr_idx + 1 < address_of_rows.size()) {
+                    number_of_neighbors = (address_of_rows[addr_idx + 1].second - row_address) / 8;
+                } else {
+                    number_of_neighbors = (file_size - row_address) / 8;
+                }
+                if (number_of_neighbors <= 0) {
+                    results[out_idx] = std::move(result);
+                    continue;
+                }
+                // Read the neighbor data
+                ifstream bin_file(bin_filename, ios::binary);
+                if (!bin_file) {
+                    cerr << "Error: Could not open " << bin_filename << " for row " << query_row << endl;
+                    results[out_idx] = std::move(result);
+                    continue;
+                }
+                bin_file.seekg(row_address);
+
+                vector<int32_t> neighbor_differences(number_of_neighbors);
+                bin_file.read(reinterpret_cast<char*>(neighbor_differences.data()), number_of_neighbors * sizeof(int32_t));
+                vector<int32_t> neighbor_values(number_of_neighbors);
+                bin_file.read(reinterpret_cast<char*>(neighbor_values.data()), number_of_neighbors * sizeof(int32_t));
+
+                unordered_map<int64_t, int64_t> row_to_dot_map;
+
+                int current_col = 0;
+                for (int i = 0; i < number_of_neighbors; ++i) {
+                    current_col += neighbor_differences[i];
+                    row_to_dot_map[current_col] = neighbor_values[i];
+                }
+
+                // result.neighbor_indices.reserve(cols.size());
+                // result.neighbor_values.reserve(cols.size());
+                result.reserve(cols.size());
+
+                for(int64_t i=0; i<cols.size(); i++){
+                    int64_t col_indx = cols[i];
+                    auto it = row_to_dot_map.find(col_indx);
+                    if (it == row_to_dot_map.end()) {
+                        result.push_back(0);
+                    }
+                    else{
+                        result.push_back(it->second);
+                    }
+                }
+                
+                // int32_t current_col = 0, curr_col_indx = 0;
+                // for (int i = 0; i < number_of_neighbors; ++i) {
+                //     if(curr_col_indx == cols.size()) break;
+                //     current_col += neighbor_differences[i];
+                //     std::cout<<i<<" "<<current_col<<" "<<cols[curr_col_indx]<<std::endl;
+                //     if(current_col == cols[curr_col_indx]){
+                //         curr_col_indx++;
+                //         result.neighbor_indices.push_back(current_col);
+                //         result.neighbor_values.push_back(neighbor_values[i]);
+                //     }
+                //     else if(current_col>cols[curr_col_indx]){
+                //         while(1){
+                //             if(current_col == cols[curr_col_indx]){
+                //                 curr_col_indx++;
+                //                 result.neighbor_indices.push_back(current_col);
+                //                 result.neighbor_values.push_back(neighbor_values[i]);
+                //                 break;
+                //             }
+                //             else if(current_col > cols[curr_col_indx]){
+                //                 result.neighbor_indices.push_back(cols[curr_col_indx]);
+                //                 result.neighbor_values.push_back(0);
+                //                 curr_col_indx++;
+                //             }
+                //             else{
+                //                 break;
+                //             }
+                //         }
+                //     }
+                    
+                // }
+                // if(curr_col_indx < cols.size()){
+                //     while(curr_col_indx < cols.size()){
+                //         result.neighbor_indices.push_back(cols[curr_col_indx++]);
+                //         result.neighbor_values.push_back(0);
+                //     }
+                // }
+                results[out_idx] = std::move(result);
+
+            }
+
+            // Clean up decompressed files for this shard
+            cleanup_decompressed_files(shard_folder);
+        }
+
+        return results;
+    }
+
 
     // Convert query string to index (supports both numeric indices and identifiers)
     int parse_query_to_index(const string& query_str, const unordered_map<string, int>& id_to_index) {
@@ -289,7 +451,8 @@ namespace pc_mat {
     }
 
     // Read queries from file
-    vector<int> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index) {
+    vector<int> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index,
+        std::vector<std::string>& id_vec) {
         vector<int> queries;
         ifstream file(filename);
         
@@ -310,6 +473,11 @@ namespace pc_mat {
             int index = parse_query_to_index(line, id_to_index);
             if (index >= 0) {
                 queries.push_back(index);
+                id_vec.push_back(line);
+            }
+            else{
+                // queries.push_back(-1);
+                // id_vec.push_back("UNKNOWN");
             }
         }
         
@@ -439,11 +607,122 @@ namespace pc_mat {
         return index_to_neighbors;
     }
 
-    vector<Result> query(string matrix_folder, string query_file){
-        vector<string> query_ids_str;
-        bool read_from_stdin = false;
-        bool show_help = false;
 
+    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::string row_file, std::string col_file,
+                std::vector<std::string>& row_vec, std::vector<std::string>& col_vec){
+        if (matrix_folder.empty()) {
+            cerr << "Error: --matrix_folder is required" << endl;
+        }
+
+        if (!fs::exists(matrix_folder)) {
+            cerr << "Error: Matrix folder does not exist: " << matrix_folder << endl;
+        }
+
+        // Ensure matrix_folder ends with '/'
+        if (!matrix_folder.empty() && matrix_folder.back() != '/' && matrix_folder.back() != '\\') {
+            matrix_folder += '/';
+        }
+
+        // Load vector identifiers and create mapping
+        vector<string> identifiers;
+        unordered_map<string, int> id_to_index = load_vector_identifiers(matrix_folder, identifiers);
+
+        vector<float> vector_norms;
+        load_vector_norms(matrix_folder, vector_norms);
+        
+        int total_vectors = identifiers.size();
+        std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;
+        if (total_vectors <= 0) {
+            cerr << "Error: Could not determine total number of vectors" << endl;
+        }
+
+        // Discover number of shards
+        int num_shards = discover_shards(matrix_folder);
+        // num_shards = 100;
+        // cout << "DEBUG NUM SHASS" << endl;
+        if (num_shards <= 0) {
+            cerr << "Error: No shard folders found in " << matrix_folder << endl;
+        }
+
+        // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
+
+        // auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
+        // exit(0);
+
+
+        // Determine queries
+        // vector<int> queries;
+        vector<int32_t> row_queries_vec, col_queries_vec;
+        
+        
+        row_queries_vec = read_queries_from_file(row_file, id_to_index, row_vec);
+        col_queries_vec = read_queries_from_file(col_file, id_to_index, col_vec);
+
+        // for(size_t i=0; i<row_queries_vec.size(); i++){
+        //     std::cout<<row_queries_vec[i]<<" ";
+        // }
+        // std::cout<<std::endl;
+        // for(size_t i=0; i<col_queries_vec.size(); i++){
+        //     std::cout<<col_queries_vec[i]<<" ";
+        // }
+        // std::cout<<std::endl;
+
+        if (row_queries_vec.empty() || col_queries_vec.empty()) {
+            cerr << "Error: No valid queries found" << endl;
+        }
+
+        // Query all at once using load_neighbors_for_rows
+        vector<std::vector<int64_t> > all_neighbors = load_neighbors_for_slice(matrix_folder, row_queries_vec, col_queries_vec, total_vectors, num_shards);
+
+        vector<std::vector<float> > all_results(row_queries_vec.size());
+
+        for (size_t q = 0; q < row_queries_vec.size(); ++q) {
+            int query_row = row_queries_vec[q];
+            // cout << "Query: " << query_row << " (" << identifiers[query_row] << ")" << endl;
+
+            if (query_row < 0 || query_row >= total_vectors) {
+                cout << "  Error: Query row " << query_row << " is out of range [0, " << total_vectors << ")" << endl;
+                continue;
+            }
+
+            std::vector<int64_t>& neighbors = all_neighbors[q];
+
+            if (neighbors.empty()) {
+                // No neighbors found in database
+                std::vector<float> res;
+                for(size_t i=0; i<col_queries_vec.size(); i++) res.push_back(0);
+                all_results[q] = std::move(res);
+            } else {
+                // cout << "  Found " << neighbors.neighbor_indices.size() << " neighbors:" << endl;
+                // Pair each neighbor index with its value (intersection size)
+                vector<pair<int64_t, int64_t>> neighbor_pairs;
+                for (size_t i = 0; i < neighbors.size(); ++i) {
+                    neighbor_pairs.emplace_back(col_queries_vec[i], neighbors[i]);
+                }
+                
+                std::vector<float> res;
+                for (const auto& [neighbor_idx, intersection] : neighbor_pairs) {
+                    // string neighbor_id = (neighbor_idx < total_vectors) ? identifiers[neighbor_idx] : "UNKNOWN";
+                    float norm_a = vector_norms[query_row]*vector_norms[query_row];
+                    float norm_b = vector_norms[neighbor_idx]*vector_norms[neighbor_idx];
+                    float jaccard;
+                    jaccard = intersection == 0 ? 0 : intersection / (norm_a + norm_b - intersection);
+                    res.push_back(jaccard);
+                    // if (neighbor_idx == 34){
+                    // if (jaccard > 0.1 && neighbor_idx < 35000){
+                        // cout << "  " << neighbor_idx << " (" << neighbor_id << ") intersection=" << intersection
+                        //     << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
+                    // }
+                }
+                all_results[q] = std::move(res);
+            }
+            // cout << endl;
+        }
+        return all_results;
+    }
+
+
+    vector<Result> query(string matrix_folder, string query_file, std::vector<string>& query_ids_str){
         if (matrix_folder.empty()) {
             cerr << "Error: --matrix_folder is required" << endl;
         }
@@ -486,11 +765,10 @@ namespace pc_mat {
 
         // Determine queries
         vector<int> queries;
+        std::vector<std::string> query_id_vec;
         
-        if (read_from_stdin) {
-            queries = read_queries_from_stdin(id_to_index);
-        } else if (!query_file.empty()) {
-            queries = read_queries_from_file(query_file, id_to_index);
+        if (!query_file.empty()) {
+            queries = read_queries_from_file(query_file, id_to_index, query_id_vec);
         } else if (!query_ids_str.empty()) {
             // Convert command line query IDs
             for (const string& query_str : query_ids_str) {
@@ -526,15 +804,15 @@ namespace pc_mat {
             } else {
                 // cout << "  Found " << neighbors.neighbor_indices.size() << " neighbors:" << endl;
                 // Pair each neighbor index with its value (intersection size)
-                vector<pair<int, int>> neighbor_pairs;
+                vector<pair<int64_t, int64_t>> neighbor_pairs;
                 for (size_t i = 0; i < neighbors.neighbor_indices.size(); ++i) {
                     neighbor_pairs.emplace_back(neighbors.neighbor_indices[i], neighbors.neighbor_values[i]);
                 }
 
-                // Sort by Jaccard index (intersection / union) in descending order
+                // Sort by Jaccard index (int64_tersection / union) in descending order
                 // Jaccard = intersection / (|A| + |B| - intersection)
                 // |A| = vector_norms[query_row], |B| = vector_norms[neighbor_idx]
-                sort(neighbor_pairs.begin(), neighbor_pairs.end(), [&](const pair<int, int>& a, const pair<int, int>& b) {
+                sort(neighbor_pairs.begin(), neighbor_pairs.end(), [&](const pair<int64_t, int64_t>& a, const pair<int64_t, int64_t>& b) {
                     int idx_a = a.first, idx_b = b.first;
                     float norm_a = vector_norms[query_row]*vector_norms[query_row];
                     float norm_ba = vector_norms[idx_a]*vector_norms[idx_a];
