@@ -18,13 +18,13 @@ using namespace std;
 
 namespace pc_mat{
     struct NeighborData {
-        vector<uint32_t> neighbor_indices;
-        vector<uint32_t> neighbor_values; // Check: Should this be int64_t?
+        vector<uint64_t> neighbor_indices;
+        vector<uint64_t> neighbor_values; // Check: Should this be int64_t?
     };
 
     struct Neighbors
     {
-        std::vector<std::pair<uint32_t, uint16_t>> index_jaccard;
+        std::vector<std::pair<uint64_t, uint32_t>> index_jaccard;
     };
     
 
@@ -98,7 +98,7 @@ namespace pc_mat{
         vector<float> jaccard_similarities;
     };
 
-    vector<Result> query(string matrix_folder, string query_file, std::vector<string>& query_ids_str);
+    vector<Result> query(string matrix_folder, std::string db_folder, string query_file, std::vector<string>& query_ids_str);
     std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::string row_file, std::string col_file,
                     std::vector<std::string>& row_vec, std::vector<std::string>& col_vec);
 } // namespace pc_mat

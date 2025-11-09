@@ -731,10 +731,10 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
     if (!fs::exists(folder)) {
         fs::create_directories(folder);
     }
-    const double MULT_CONST = (1ULL << 10) - 1;
+    const double MULT_CONST = (1ULL << 8) - 1;
     // unordered_map<int, std::pair<vector<int>,vector<uint32_t>>> reorganized_results;
     unordered_map<uint32_t, std::vector<std::pair<uint32_t, uint16_t> > >reorganized_results;
-    std::ofstream jac_os("jaccards.txt");
+    // std::ofstream jac_os("jaccards.txt");
     for (const auto& [row, col, value] : results) {
         // if(row == col) continue;
         double norm_curr = all_norms_vec[row];
@@ -743,11 +743,11 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         double jaccard = inter_col / (norm_curr + norm_col - inter_col);
         if(jaccard > 1) jaccard = 1;
         uint16_t quantized_jaccard = static_cast<uint16_t>(round(jaccard * MULT_CONST));
-        if(row == 9599){
-            jac_os<<"is: "<<inter_col<<" ns: "<<norm_curr<<" nn: "<<norm_col
-                <<" jac: "<<jaccard<<" qj: "<<quantized_jaccard
-                <<std::endl;
-        }
+        // if(row == 9599){
+        //     jac_os<<"is: "<<inter_col<<" ns: "<<norm_curr<<" nn: "<<norm_col
+        //         <<" jac: "<<jaccard<<" qj: "<<quantized_jaccard
+        //         <<std::endl;
+        // }
         reorganized_results[row].push_back(std::make_pair(col, quantized_jaccard));
     }
 
@@ -787,16 +787,6 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
             neighbor_jaccard_vec.push_back(j);
         }
 
-        // for(size_t i=0; i<neighbor_pair_vec.size(); i++){
-        //     neighbor_indx_vec[i] = neighbor_pair_vec[i].first;
-        //     neighbor_jaccard_vec[i] = neighbor_pair_vec[i].second;
-        //     // if(neighbor_pair_vec[i].second >= 1) neighbor_jaccard_vec[i] = static_cast<uint16_t>(MULT_CONST);
-        //     // else neighbor_jaccard_vec[i] = static_cast<uint16_t>(round(neighbor_pair_vec[i].second * MULT_CONST));
-        //     // if(row == 5722){
-        //     //     std::cout<<i<<" "<<neighbor_pair_vec[i].second<<" "<<neighbor_jaccard_vec[i]<<std::endl;
-        //     // }
-        // }
-
         // Record this row index and its stored position 
         uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
         row_vec[indx] = row;
@@ -805,42 +795,48 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         start_neighbor[indx++] = neighbor_indx_vec[0];
         // start_neighbor[indx] = neighbor_indx_vec[0]; //FIXME: indx++ if not vbyte
         
-        std::vector<uint32_t> delta_cols(neighbor_indx_vec.size()-1);
+        std::vector<uint64_t> delta_cols(neighbor_indx_vec.size()-1);
         for (size_t k = 1; k < neighbor_indx_vec.size(); ++k) {
             assert(neighbor_indx_vec[k] > neighbor_indx_vec[k-1]);
             delta_cols[k-1] = neighbor_indx_vec[k] - neighbor_indx_vec[k-1];
         }
 
+        bits::compact_vector cv_jc;
+        cv_jc.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
+        cv_jc.save(bin_out);
+        
+        jac_space += cv_jc.num_bytes();
+        
+        assert(neighbor_jaccard_vec.size() >= 1);
+        
+        if(neighbor_jaccard_vec.size() == 1) continue;
+        
         bits::rice_sequence<> rs_delta;
         rs_delta.encode(delta_cols.begin(), delta_cols.size());
         rs_delta.save(bin_out);
 
-        // std::vector<uint8_t> enc_delta(streamvbyte_max_compressedbytes(delta_cols.size()));
-        // uint64_t bytes_written = streamvbyte_encode(delta_cols.data(), delta_cols.size(), 
-        //             enc_delta.data());
-        // bytes_written_vec[indx++] = bytes_written;
-        // bin_out.write(reinterpret_cast<const char*>(enc_delta.data()), bytes_written);  
+        
 
         
-        bits::compact_vector cv_jc;
-        cv_jc.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
-        cv_jc.save(bin_out);
+        
+        
 
-        if(row == 9599){
-            std::cout<<row<<" "<<current_pos
-                <<" "<<rs_delta.size()+1<<" "<<neighbor_indx_vec.size()<<" "<< neighbor_indx_vec[0]
-            <<std::endl;
-        }
+        // if(row == 9599){
+        //     std::cout<<row<<" "<<current_pos
+        //         <<" "<<rs_delta.size()+1<<" "<<neighbor_indx_vec.size()<<" "<< neighbor_indx_vec[0]
+        //     <<std::endl;
+        // }
 
         // bits::rice_sequence<> rs_jac;
         // rs_jac.encode(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
         // rs_jac.save(bin_out);
 
-        jac_space += cv_jc.num_bytes();
+        
         // jac_space += rs_jac.num_bytes();
         // ngh_space += bytes_written;
         // ngh_space += ngh_rs.num_bytes();
         ngh_space += rs_delta.num_bytes();
+        // ngh_space += cv_delta.num_bytes();
         // ngh_space += bytes_written;
         
     }
@@ -1057,7 +1053,7 @@ void write_sparse_results_vbyte(const string& folder,
 
 int main(int argc, char* argv[]) {
     // Argument parsing using clipp
-    string matrix_file;
+    string db_folder, matrix_file;
     int dimension = 0;
     double max_memory_gb = 0.0;
     int num_threads = 1;
@@ -1071,7 +1067,7 @@ int main(int argc, char* argv[]) {
     bool show_help = false;
 
     auto cli = (
-        clipp::option("--vectors") & clipp::value("file", matrix_file),
+        clipp::option("--db") & clipp::value("file", db_folder),
         clipp::option("--dimension") & clipp::value("int", dimension),
         clipp::option("--max_memory_gb") & clipp::value("float", max_memory_gb),
         clipp::option("--num_threads") & clipp::value("int", num_threads),
@@ -1091,7 +1087,7 @@ int main(int argc, char* argv[]) {
         return show_help ? 0 : 1;
     }
 
-    if (matrix_file.empty() || dimension <= 0 || max_memory_gb <= 0.0 || num_threads <= 0 || output_folder.empty() || num_shards <= 0 || shard_idx < 0 || shard_idx >= num_shards) {
+    if (db_folder.empty() || dimension <= 0 || max_memory_gb <= 0.0 || num_threads <= 0 || output_folder.empty() || num_shards <= 0 || shard_idx < 0 || shard_idx >= num_shards) {
         cerr << "Missing or invalid arguments. Use --help for usage." << endl;
         return 1;
     }
@@ -1101,9 +1097,15 @@ int main(int argc, char* argv[]) {
         output_folder += '/';
     }
 
-    string norms_file = output_folder + "vector_norms.txt";
+    if (!db_folder.empty() && db_folder.back() != '/' && db_folder.back() != '\\') {
+        output_folder += '/';
+    }
+
+    matrix_file = db_folder + "vectors.bin";
+
+    string norms_file = db_folder + "vector_norms.txt";
     if (!fs::exists(norms_file)) {
-        cerr << "Error: Required file 'vector_norms.txt' not found in output folder: " << output_folder << endl;
+        cerr << "Error: Required file 'vector_norms.txt' not found in output folder: " << db_folder << endl;
         return 1;
     }
 
@@ -1156,8 +1158,8 @@ int main(int argc, char* argv[]) {
     int begin_row = shard_idx * rows_per_shard;
     int end_row = min(begin_row + rows_per_shard, total_vectors);
 
-    begin_row = 9599;
-    end_row = begin_row + 2;
+    // begin_row = 9599;
+    // end_row = begin_row + 2;
 
     cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row << endl;
 

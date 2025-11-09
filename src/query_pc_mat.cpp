@@ -4,35 +4,40 @@
 
 namespace fs = std::filesystem;
 
-void query_nearest_neighbors(std::string matrix_folder, std::string query_file,
+void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, std::string query_file,
         std::vector<std::string>& query_ids_str, bool write_to_file, bool show_all_neighbors, int64_t top_n){
     auto start = std::chrono::high_resolution_clock::now();
-    vector<pc_mat::Result> all_results = pc_mat::query(matrix_folder, query_file, query_ids_str);
+    vector<pc_mat::Result> all_results = pc_mat::query(matrix_folder, db_folder, query_file, query_ids_str);
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end - start;
     std::cout << "Query completed in " << elapsed.count() << " seconds.\n" << std::endl;
+
+    std::ofstream log_out(matrix_folder + "/neighbors_all.txt");
     
     for(int i=0; i< all_results.size(); i++){
         
         const pc_mat::Result& res = all_results[i];
-        std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
-        int64_t num_neighbors_to_show = show_all_neighbors ? 
-                    res.neighbor_ids.size()
-                    :std::min<int64_t>(top_n, res.neighbor_ids.size());
-        std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
-        std::ofstream out;
-        if(write_to_file) {
-            std::string nfn = res.self_id+".neighbors.txt";
-            out.open(nfn.c_str());
-            out<<"ID Jaccard\n";
-        }
-        for (size_t j = 0; j < num_neighbors_to_show; ++j) {
-            std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
-                 << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
-            if(write_to_file) out<<res.neighbor_ids[j]<<" "<<res.jaccard_similarities[j]<<std::endl;
-        }
-        std::cout << std::endl;
-        out.close();
+        // std::cout<<i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
+        log_out<<i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
+        // std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
+        // int64_t num_neighbors_to_show = show_all_neighbors ? 
+        //             res.neighbor_ids.size()
+        //             :std::min<int64_t>(top_n, res.neighbor_ids.size());
+        // std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
+
+        // std::ofstream out;
+        // if(write_to_file) {
+        //     std::string nfn = res.self_id+".neighbors.txt";
+        //     out.open(nfn.c_str());
+        //     out<<"ID Jaccard\n";
+        // }
+        // for (size_t j = 0; j < num_neighbors_to_show; ++j) {
+        //     std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
+        //          << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
+        //     if(write_to_file) out<<res.neighbor_ids[j]<<" "<<res.jaccard_similarities[j]<<std::endl;
+        // }
+        // std::cout << std::endl;
+        // out.close();
     }
 }
 
@@ -82,7 +87,7 @@ void query_sliced_matrix(std::string matrix_folder, std::string row_file, std::s
 int main(int argc, char* argv[]) {
 
     // Command line arguments
-    string matrix_folder;
+    string matrix_folder, db_folder;
     string query_file;
     std::string row_file, col_file;
     // string neighbor_fn = "neighbors.txt";
@@ -99,6 +104,7 @@ int main(int argc, char* argv[]) {
 
     auto cli = (
         clipp::option("--matrix_folder") & clipp::value("folder", matrix_folder),
+        clipp::option("--db") & clipp::value("folder", db_folder),
         (
             (clipp::option("--query_file").set(use_query_file) & clipp::value("file", query_file)) |
             (clipp::option("--query_ids").set(use_query_ids) & clipp::values("ids", query_ids_str)) |
@@ -119,6 +125,7 @@ int main(int argc, char* argv[]) {
         cout << "Usage:\n" << clipp::usage_lines(cli, argv[0]) << "\n\n";
         cout << "Options:\n";
         cout << "  --matrix_folder  Folder containing the pairwise matrix files\n";
+        cout << "  --db  Folder containing the matrix meta data\n";
         cout << "  --query_file     File containing query IDs (one per line)\n";
         cout << "  --query_ids      Query IDs as command line arguments (numeric indices or identifiers)\n";
         cout << "  --row_file     File containing query row IDs (one per line)\n";
@@ -137,7 +144,7 @@ int main(int argc, char* argv[]) {
     }
 
     if(use_query_file || use_query_ids){
-        query_nearest_neighbors(matrix_folder, query_file, query_ids_str, write_to_file, show_all_neighbors, top_n);
+        query_nearest_neighbors(matrix_folder, db_folder, query_file, query_ids_str, write_to_file, show_all_neighbors, top_n);
     }
     else if(use_row_col_files){
         if(row_file.empty() || col_file.empty()){

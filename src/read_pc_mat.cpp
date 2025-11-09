@@ -209,7 +209,7 @@ namespace pc_mat {
 
             for (const auto& [out_idx, query_row] : queries) {
                 query_count++;
-                std::cout<<query_count<<" "<<out_idx<<": "<<query_row<<": ";
+                // std::cout<<query_count<<" "<<out_idx<<": "<<query_row<<": ";
                 NeighborData result;
                 auto it = row_to_addr_idx.find(query_row);
                 if (it == row_to_addr_idx.end()) {
@@ -259,7 +259,7 @@ namespace pc_mat {
                     result.neighbor_values[i] = neighbor_values[i];
                 }
                 results[out_idx] = std::move(result);
-                std::cout<<number_of_neighbors<<std::endl;
+                // std::cout<<number_of_neighbors<<std::endl;
             }
 
             // Clean up decompressed files for this shard
@@ -506,106 +506,106 @@ namespace pc_mat {
         return queries;
     }
 
-    vector<double> compute_closest_neighbor_distance(
-        const string& matrix_folder,
-        int total_vectors,
-        int num_shards,
-        vector<string> identifiers
-    ) {
-        vector<double> ratios(total_vectors, -1.0);
+    // vector<double> compute_closest_neighbor_distance(
+    //     const string& matrix_folder,
+    //     int total_vectors,
+    //     int num_shards,
+    //     vector<string> identifiers
+    // ) {
+    //     vector<double> ratios(total_vectors, -1.0);
 
-        // Prepare all indices
-        vector<int> all_rows(total_vectors);
-        for (int i = 0; i < total_vectors; ++i) {
-            all_rows[i] = i;
-        }
+    //     // Prepare all indices
+    //     vector<int> all_rows(total_vectors);
+    //     for (int i = 0; i < total_vectors; ++i) {
+    //         all_rows[i] = i;
+    //     }
 
-        // Batch load all neighbors in batches of one shard size
-        int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+    //     // Batch load all neighbors in batches of one shard size
+    //     int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
 
-        for (int batch_start = 0; batch_start < total_vectors; batch_start += rows_per_shard) {
-            int batch_end = min(batch_start + rows_per_shard, total_vectors);
-            vector<int> batch_rows;
-            for (int i = batch_start; i < batch_end; ++i) {
-                batch_rows.push_back(i);
-            }
-            vector<NeighborData> batch_neighbors = load_neighbors_for_rows(matrix_folder, batch_rows, total_vectors, num_shards);
-            for (size_t i = 0; i < batch_neighbors.size(); ++i) {
-                const NeighborData& nd = batch_neighbors[i];
-                if (nd.neighbor_values.size() < 2) {
-                    ratios[batch_rows[i]] = -1.0;
-                    continue;
-                }
-                vector<int> sorted_indices(nd.neighbor_values.size());
-                std::iota(sorted_indices.begin(), sorted_indices.end(), 0);
-                sort(sorted_indices.begin(), sorted_indices.end(), [&](int a, int b) {
-                    return nd.neighbor_values[a] > nd.neighbor_values[b];
-                });
-                int best = nd.neighbor_values[sorted_indices[0]];
-                int second_best = nd.neighbor_values[sorted_indices[1]];
-                if (second_best != 0) {
-                    ratios[batch_rows[i]] = second_best / static_cast<double>(best);
-                } else {
-                    ratios[batch_rows[i]] = -1.0;
-                }
-                if (nd.neighbor_indices.size() >= 2) {
-                    int idx1 = sorted_indices[0];
-                    int idx2 = sorted_indices[1];
-                    int neighbor1 = nd.neighbor_indices[idx1];
-                    int neighbor2 = nd.neighbor_indices[idx2];
-                    double ratio = (second_best != 0) ? (second_best / static_cast<double>(best)) : -1.0;
-                    if (ratio != -1){
-                        ratios.push_back(ratio);
-                        for (auto _ = 0 ; _ < best ; _+=30){
-                            cout << ratio << " ";
-                        }
-                    }
-                }
-            }
-            if (ratios.size() > 1000000){
-                cout << endl;
-                break;
-            }
-        }
+    //     for (int batch_start = 0; batch_start < total_vectors; batch_start += rows_per_shard) {
+    //         int batch_end = min(batch_start + rows_per_shard, total_vectors);
+    //         vector<int> batch_rows;
+    //         for (int i = batch_start; i < batch_end; ++i) {
+    //             batch_rows.push_back(i);
+    //         }
+    //         vector<NeighborData> batch_neighbors = load_neighbors_for_rows(matrix_folder, batch_rows, total_vectors, num_shards);
+    //         for (size_t i = 0; i < batch_neighbors.size(); ++i) {
+    //             const NeighborData& nd = batch_neighbors[i];
+    //             if (nd.neighbor_values.size() < 2) {
+    //                 ratios[batch_rows[i]] = -1.0;
+    //                 continue;
+    //             }
+    //             vector<int> sorted_indices(nd.neighbor_values.size());
+    //             std::iota(sorted_indices.begin(), sorted_indices.end(), 0);
+    //             sort(sorted_indices.begin(), sorted_indices.end(), [&](int a, int b) {
+    //                 return nd.neighbor_values[a] > nd.neighbor_values[b];
+    //             });
+    //             int best = nd.neighbor_values[sorted_indices[0]];
+    //             int second_best = nd.neighbor_values[sorted_indices[1]];
+    //             if (second_best != 0) {
+    //                 ratios[batch_rows[i]] = second_best / static_cast<double>(best);
+    //             } else {
+    //                 ratios[batch_rows[i]] = -1.0;
+    //             }
+    //             if (nd.neighbor_indices.size() >= 2) {
+    //                 int idx1 = sorted_indices[0];
+    //                 int idx2 = sorted_indices[1];
+    //                 int neighbor1 = nd.neighbor_indices[idx1];
+    //                 int neighbor2 = nd.neighbor_indices[idx2];
+    //                 double ratio = (second_best != 0) ? (second_best / static_cast<double>(best)) : -1.0;
+    //                 if (ratio != -1){
+    //                     ratios.push_back(ratio);
+    //                     for (auto _ = 0 ; _ < best ; _+=30){
+    //                         cout << ratio << " ";
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //         if (ratios.size() > 1000000){
+    //             cout << endl;
+    //             break;
+    //         }
+    //     }
 
-        return ratios;
-    }
+    //     return ratios;
+    // }
 
-    unordered_map<int, vector<int>> get_neighbors_above_threshold(
-        const string& matrix_folder,
-        int total_vectors,
-        int num_shards,
-        vector<float> vector_norms,
-        double threshold
-    ) {
-        unordered_map<int, vector<int>> index_to_neighbors;
+    // unordered_map<int, vector<int>> get_neighbors_above_threshold(
+    //     const string& matrix_folder,
+    //     int total_vectors,
+    //     int num_shards,
+    //     vector<float> vector_norms,
+    //     double threshold
+    // ) {
+    //     unordered_map<int, vector<int>> index_to_neighbors;
 
-        // Process in batches per shard for efficiency
-        int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
-        for (int batch_start = 0; batch_start < total_vectors; batch_start += rows_per_shard) {
-            int batch_end = min(batch_start + rows_per_shard, total_vectors);
-            vector<int> batch_rows;
-            for (int i = batch_start; i < batch_end; ++i) {
-                batch_rows.push_back(i);
-            }
-            vector<NeighborData> batch_neighbors = load_neighbors_for_rows(matrix_folder, batch_rows, total_vectors, num_shards);
-            for (size_t i = 0; i < batch_neighbors.size(); ++i) {
-                const NeighborData& nd = batch_neighbors[i];
-                vector<int> filtered_neighbors;
-                for (size_t j = 0; j < nd.neighbor_indices.size(); ++j) {
-                    // Assuming neighbor_values are similarity scores as int, convert to double in [0,1]
-                    double sim = static_cast<double>(nd.neighbor_values[j]) / vector_norms[batch_rows[i]] ;
-                    if (sim > threshold) {
-                        filtered_neighbors.push_back(nd.neighbor_indices[j]);
-                    }
-                }
-                if (!filtered_neighbors.empty()) {
-                    index_to_neighbors[batch_rows[i]] = std::move(filtered_neighbors);
-                }
-            }
-        }
-        return index_to_neighbors;
-    }
+    //     // Process in batches per shard for efficiency
+    //     int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+    //     for (int batch_start = 0; batch_start < total_vectors; batch_start += rows_per_shard) {
+    //         int batch_end = min(batch_start + rows_per_shard, total_vectors);
+    //         vector<int> batch_rows;
+    //         for (int i = batch_start; i < batch_end; ++i) {
+    //             batch_rows.push_back(i);
+    //         }
+    //         vector<NeighborData> batch_neighbors = load_neighbors_for_rows(matrix_folder, batch_rows, total_vectors, num_shards);
+    //         for (size_t i = 0; i < batch_neighbors.size(); ++i) {
+    //             const NeighborData& nd = batch_neighbors[i];
+    //             vector<int> filtered_neighbors;
+    //             for (size_t j = 0; j < nd.neighbor_indices.size(); ++j) {
+    //                 // Assuming neighbor_values are similarity scores as int, convert to double in [0,1]
+    //                 double sim = static_cast<double>(nd.neighbor_values[j]) / vector_norms[batch_rows[i]] ;
+    //                 if (sim > threshold) {
+    //                     filtered_neighbors.push_back(nd.neighbor_indices[j]);
+    //                 }
+    //             }
+    //             if (!filtered_neighbors.empty()) {
+    //                 index_to_neighbors[batch_rows[i]] = std::move(filtered_neighbors);
+    //             }
+    //         }
+    //     }
+    //     return index_to_neighbors;
+    // }
 
 
     std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::string row_file, std::string col_file,
@@ -722,7 +722,7 @@ namespace pc_mat {
     }
 
 
-    vector<Result> query(string matrix_folder, string query_file, std::vector<string>& query_ids_str){
+    vector<Result> query(string matrix_folder, std::string db_folder, string query_file, std::vector<string>& query_ids_str){
         if (matrix_folder.empty()) {
             cerr << "Error: --matrix_folder is required" << endl;
         }
@@ -736,12 +736,16 @@ namespace pc_mat {
             matrix_folder += '/';
         }
 
+        if (!db_folder.empty() && db_folder.back() != '/' && db_folder.back() != '\\') {
+            matrix_folder += '/';
+        }
+
         // Load vector identifiers and create mapping
         vector<string> identifiers;
-        unordered_map<string, int> id_to_index = load_vector_identifiers(matrix_folder, identifiers);
+        unordered_map<string, int> id_to_index = load_vector_identifiers(db_folder, identifiers);
 
         vector<float> vector_norms;
-        load_vector_norms(matrix_folder, vector_norms);
+        load_vector_norms(db_folder, vector_norms);
         
         int total_vectors = identifiers.size();
         std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;

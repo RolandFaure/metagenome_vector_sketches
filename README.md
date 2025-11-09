@@ -44,7 +44,7 @@ python3 ../src/jaccard.py index toy_index -t 8
 Use the vectors to create pairwise matrix:
 
 ``` shell
-../build/pairwise_comp_optimized --vectors toy_index/vectors.bin --dimension 2048 --output_folder toy_index/ --max_memory_gb 12 --num_threads 8
+../build/pairwise_comp_optimized --db toy_index/ --dimension 2048 --output_folder toy_index/ --max_memory_gb 12 --num_threads 8
 ```
 
 ../build/pairwise_comp_optimized --vectors toy_index_rice/vectors.bin --dimension 2048 --output_folder toy_index_rice/ --max_memory_gb 12 --num_threads 8

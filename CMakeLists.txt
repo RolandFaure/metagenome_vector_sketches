@@ -86,6 +86,7 @@ add_executable(query_ava_matrix
 )
 target_include_directories(query_ava_matrix PRIVATE ${EIGEN_INCLUDE_DIR})
 
+
 add_library(pc_mat_lib STATIC src/read_pc_mat.cpp)
 set_target_properties(pc_mat_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pc_mat_lib PUBLIC include)
@@ -109,13 +110,12 @@ target_link_libraries(pc_mat_cmp_lib PUBLIC
 add_executable(query_pc_mat
     src/query_pc_mat.cpp
 )
-# target_link_libraries(query_pc_mat PRIVATE pc_mat_lib)
 target_link_libraries(query_pc_mat PRIVATE pc_mat_lib)
+
 
 add_executable(query_pc_mat_cmp
     src/query_pc_mat.cpp
 )
-# target_link_libraries(query_pc_mat PRIVATE pc_mat_lib)
 target_link_directories(query_pc_mat_cmp PRIVATE
     /scratch/mqa6002/software/local/lib/
 )
