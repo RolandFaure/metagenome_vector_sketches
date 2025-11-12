@@ -1,12 +1,20 @@
 #include "read_pc_mat.h"
 #include "clipp.h"
+#include "cnpy.h"
 #include <cassert>
 
 namespace fs = std::filesystem;
 
+
+void show_error_and_exit(std::string msg){
+    std::cerr<<msg<<std::endl;
+    std::cerr<<"Aborting...\n";
+    exit(1);
+}
+
 void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, std::string query_file,
         std::vector<std::string>& query_ids_str, bool write_to_file, 
-        bool show_all_neighbors, int64_t top_n, uint32_t batch_size){
+        bool show_all_neighbors, int64_t top_n, uint32_t batch_size, std::string out_fn, std::string sep, bool print_to_screen){
     
     std::vector<string> identifiers;
     unordered_map<string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
@@ -24,12 +32,11 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
             }
         }
     } else {
-        cerr << "Error: No queries specified. Use --query_file, --query_ids" << endl;
+        show_error_and_exit("Error: No queries specified. Use --query_file, --query_ids");
     }
 
     if (queries.empty()) {
-        cerr << "Error: No valid queries found" << endl;
-        exit(1);
+        show_error_and_exit("Error: No valid queries found");
     }
     
     
@@ -39,10 +46,10 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
     int total_vectors = identifiers.size();
     std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;
     if (total_vectors <= 0) {
-        cerr << "Error: Could not determine total number of vectors" << endl;
+        show_error_and_exit("Error: Could not determine total number of vectors" );
     }
     
-    std::ofstream log_out(matrix_folder + "/neighbors_all.txt");
+    // std::ofstream log_out(matrix_folder + "/neighbors_all.txt");
     std::chrono::duration<double> elapsed = std::chrono::duration<double>::zero();
 
     
@@ -58,79 +65,129 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
         for(int i=0; i< all_results.size(); i++){
         
             const pc_mat::Result& res = all_results[i];
-            std::cout<<start_indx + i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
-            log_out<<start_indx + i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
-            // std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
-            // int64_t num_neighbors_to_show = show_all_neighbors ? 
-            //             res.neighbor_ids.size()
-            //             :std::min<int64_t>(top_n, res.neighbor_ids.size());
-            // std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
+            // if(print_to_screen) std::cout<<start_indx + i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
+            // log_out<<start_indx + i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
+            if(print_to_screen) std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
+            
+            std::ofstream out;
+            if(write_to_file) {
+                std::string nfn = res.self_id+"_"+out_fn;
+                std::cout<<"Writing in file: "<<nfn<<std::endl<<std::endl;
+                out.open(nfn.c_str());
+                out<<"ID"+sep+"Jaccard\n";
+            }
 
-            // std::ofstream out;
-            // if(write_to_file) {
-            //     std::string nfn = res.self_id+".neighbors.txt";
-            //     out.open(nfn.c_str());
-            //     out<<"ID Jaccard\n";
-            // }
-            // for (size_t j = 0; j < num_neighbors_to_show; ++j) {
-            //     std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
-            //          << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
-            //     if(write_to_file) out<<res.neighbor_ids[j]<<" "<<res.jaccard_similarities[j]<<std::endl;
-            // }
-            // std::cout << std::endl;
-            // out.close();
+            int64_t num_neighbors_to_show = show_all_neighbors ? 
+                        res.neighbor_ids.size()
+                        :std::min<int64_t>(top_n, res.neighbor_ids.size());
+            if(print_to_screen) std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
+
+            for (size_t j = 0; j < num_neighbors_to_show; ++j) {
+                if(print_to_screen) std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
+                     << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
+                if(write_to_file) out<<res.neighbor_ids[j]<<sep<<res.jaccard_similarities[j]<<std::endl;
+            }
+            if(print_to_screen) std::cout << std::endl;
+            out.close();
         }
         if(end_indx == queries.size()) break;
         start_indx += batch_size;
     }    
-     
-    std::cout << "Query completed in " << elapsed.count() << " seconds.\n" << std::endl;
 
-    
-    
-    
+    std::cout << "Query completed in " << elapsed.count() << " seconds.\n" << std::endl;
 }
 
-void query_sliced_matrix(std::string matrix_folder, std::string row_file, std::string col_file,
-        bool write_to_file){
-    std::vector<std::string> row_vec;
-    std::vector<std::string> col_vec;
-    auto start = std::chrono::high_resolution_clock::now();
-    std::vector<std::vector<float> > all_results = pc_mat::query_sliced(matrix_folder, row_file, col_file, row_vec, col_vec);
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-    std::cout << "Query completed in " << elapsed.count() << " seconds.\n" << std::endl;
+void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::string row_file, std::string col_file,
+        bool write_to_file, std::string out_fn, uint32_t batch_size, bool print_to_screen, std::string sep){
+    std::vector<string> identifiers;
+    unordered_map<string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
     
+    std::vector<int32_t> row_query_vec, col_query_vec;
+    std::vector<std::string> row_vec, col_vec;
+    
+    row_query_vec = pc_mat::read_queries_from_file(row_file, id_to_index, row_vec);
+    col_query_vec = pc_mat::read_queries_from_file(col_file, id_to_index, col_vec);
+
+    if (row_query_vec.empty() || col_query_vec.empty()) {
+        show_error_and_exit("Empty row or col accessions.");
+    }
+    
+    std::vector<float> vector_norms;
+    pc_mat::load_vector_norms(db_folder, vector_norms);
+
+    int total_vectors = identifiers.size();
+    std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;
+    if (total_vectors <= 0) {
+        show_error_and_exit("Error: Could not determine total number of vectors");
+    }
+    std::chrono::duration<double> elapsed = std::chrono::duration<double>::zero();
+    uint64_t start_indx = 0, end_indx;
+
     std::ofstream out;
-    if(write_to_file) {
-        std::string nfn = "sliced.neighbors.csv";
-        out.open(nfn.c_str(), std::ios::out);
-        out<<"Accession,";
+    if(write_to_file && sep != "-1") {
+        std::cout<<"Writing in file: "<<out_fn<<std::endl<<std::endl;
+        out.open(out_fn.c_str());
+        out<<"Accession"+sep;
         for(size_t i=0; i<col_vec.size(); i++){
-            out<<col_vec[i]<<",";
+            out<<col_vec[i]<<sep;
         } 
         out<<"\n";
     }
 
-    std::cout<<" \t";
+    if(print_to_screen) std::cout<<"Accession\t";
+
     for(size_t i=0; i<col_vec.size(); i++){
-        std::cout<<col_vec[i]<<"\t";
+        if(print_to_screen) std::cout<<col_vec[i]<<"\t";
     } 
-    std::cout<<std::endl;
-    for(int i=0; i< all_results.size(); i++){
-        std::vector<float> & res = all_results[i];
-        std::cout<<row_vec[i]<<"\t";
-        if(write_to_file) out<<row_vec[i]<<",";
-        for (size_t j = 0; j < res.size(); ++j) {
-            std::cout<<res[j]<<"\t";
-            if(write_to_file) out<<res[j]<<",";
+    if(print_to_screen) std::cout<<"\n";
+
+    
+    while(1){
+        end_indx = std::min(start_indx + batch_size, row_query_vec.size());
+        std::vector<int32_t> row_sub_queries(row_query_vec.begin()+start_indx, row_query_vec.begin()+end_indx);
+        auto start = std::chrono::high_resolution_clock::now();
+        std::vector<std::vector<float> > all_results = pc_mat::query_sliced(matrix_folder, row_sub_queries, 
+            col_query_vec, total_vectors, vector_norms);
+        auto end = std::chrono::high_resolution_clock::now();
+        elapsed += (end - start);
+        
+        for(int i=0; i< all_results.size(); i++){
+            std::vector<float> & res = all_results[i];
+            
+            if(print_to_screen) std::cout<<row_vec[i]<<"\t";
+            if(write_to_file && sep != "-1") out<<row_vec[i]<<sep;
+            
+            if(print_to_screen || (write_to_file && sep != "-1")){
+                for (size_t j = 0; j < res.size(); ++j) {
+                    if(print_to_screen) std::cout<<res[j]<<"\t";
+                    if(write_to_file && sep != "-1") out<<res[j]<<sep;
+                }
+            }
+            
+            if(write_to_file && sep == "-1"){
+                cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "a");
+            }
+            
+            if(print_to_screen) std::cout << std::endl;
+            if(write_to_file && sep != "-1") out<<"\n";
         }
-        std::cout << std::endl;
-        if(write_to_file) {
-            out<<"\n";
-        }
+        
+        if(end_indx == row_query_vec.size()) break;
+        start_indx += batch_size;
     }
-    if(write_to_file) out.close();
+
+    std::cout << "Query completed in " << elapsed.count() << " seconds.\n" << std::endl;
+
+    if(write_to_file && sep != "-1") out.close();
+}
+
+std::string get_file_extension(std::string filename){
+    size_t dot_pos = filename.find_last_of(".");
+
+    if (dot_pos != std::string::npos) {
+        return filename.substr(dot_pos + 1);
+    }
+    return "";
 }
 
 
@@ -146,6 +203,8 @@ int main(int argc, char* argv[]) {
     bool read_from_stdin = false;
     bool show_help = false;
     bool write_to_file = false;
+    std::string out_fn = "out.txt";
+    bool print_to_screen = true;
     bool show_all_neighbors = false;
     
     bool use_query_file = false;
@@ -166,8 +225,9 @@ int main(int argc, char* argv[]) {
         ),
         clipp::option("--top") & clipp::value("int", top_n),
         clipp::option("--batch_size") & clipp::value("int", batch_size),
-        clipp::option("--write_to_file").set(write_to_file),
+        clipp::option("--write_to_file").set(write_to_file) & clipp::value("file", out_fn),
         clipp::option("--show_all").set(show_all_neighbors),
+        // clipp::option("--print").set(print_to_screen),
         clipp::option("--help").set(show_help)
     );
 
@@ -182,25 +242,26 @@ int main(int argc, char* argv[]) {
         cout << "  --row_file     File containing query row IDs (one per line)\n";
         cout << "  --col_file     File containing query col IDs (one per line)\n";
         // cout << "  --stdin          Read query IDs from standard input\n";
-        cout << "  --top           Number of top jaccard values to show\n";
-        cout << "  --batch_size    Number of queries to process per batch\n";
-        cout << "  --write_to_file  Whether to write neighbor results to file (named after query or for row-col case \"sliced.neighbors.csv\")\n";
+        cout << "  --top           Number of top jaccard values to show [default 10]\n";
+        cout << "  --batch_size    Number of queries to process per batch [default 100]\n";
+        cout << "  --write_to_file  Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz for row-col query. *.csv/*tsv/*txt for regular query).\n";
         cout << "  --show_all  Whether to show all neighbors instead of top N\n";
         cout << "  --help           Show this help message\n\n";
-        cout << "Examples:\n";
-        cout << "  " << argv[0] << " --matrix_folder ./results --query_ids 10 25 42\n";
-        cout << "  " << argv[0] << " --matrix_folder ./results --query_ids SRR123456 SRR789012\n";
-        cout << "  " << argv[0] << " --matrix_folder ./results --query_file queries.txt\n";
-        // cout << "  echo -e \"SRR123456\\n25\\nSRR789012\" | " << argv[0] << " --matrix_folder ./results --stdin\n";
+        // cout << "Examples:\n";
+        // cout << "  " << argv[0] << " --matrix_folder ./results --query_ids SRR123456 SRR789012\n";
+        // cout << "  " << argv[0] << " --matrix_folder ./results --query_file queries.txt\n";
         return show_help ? 0 : 1;
     }
 
     if (matrix_folder.empty()) {
-        cerr << "Error: --matrix_folder is required" << endl;
+        show_error_and_exit("Error: --matrix_folder is required.");
+    }
+    if(!use_query_file && !use_query_ids && !use_row_col_files){
+        show_error_and_exit("No query files given.");
     }
 
     if (!fs::exists(matrix_folder)) {
-        cerr << "Error: Matrix folder does not exist: " << matrix_folder << endl;
+        show_error_and_exit("Error: Matrix folder does not exist.");
     }
 
     // Ensure matrix_folder ends with '/'
@@ -212,20 +273,42 @@ int main(int argc, char* argv[]) {
         db_folder += '/';
     }
 
+    if(write_to_file && out_fn.empty()){
+        show_error_and_exit("No output filename given.");
+    }
+
     if(use_query_file || use_query_ids){
+        std::string file_extension = get_file_extension(out_fn);
+        if(write_to_file){
+            if(file_extension != "csv" && file_extension != "tsv" && file_extension != "txt"){
+                show_error_and_exit("Output file extension is: "+file_extension+". Expected: csv, tsv or txt.");
+            }
+        }
+        
+        std::string sep = file_extension == "csv" ? "," : "\t";
         query_nearest_neighbors(matrix_folder, db_folder, query_file, query_ids_str, 
-            write_to_file, show_all_neighbors, top_n, batch_size);
+            write_to_file, show_all_neighbors, top_n, batch_size, out_fn, sep, print_to_screen);
     }
     else if(use_row_col_files){
         if(row_file.empty() || col_file.empty()){
-            std::cerr<<"Either row or col file is not specified. Aborting...\n";
-            exit(-1);    
+            show_error_and_exit("Either row or col file is not specified.");
         }
-        query_sliced_matrix(matrix_folder, row_file, col_file, write_to_file);
+        std::string file_extension = get_file_extension(out_fn);
+        if(write_to_file){
+            if(file_extension != "csv" && file_extension != "tsv" && file_extension != "npy" && file_extension != "npz"){
+                show_error_and_exit("Output file extension is: "+file_extension+". Expected: csv, tsv, npy or npz.");
+            }
+        }
+        std::string sep = "-1";
+        if(file_extension == "csv" || file_extension == "tsv"){
+            sep = file_extension == "csv" ? "," : "\t";
+        }
+
+        query_sliced_matrix(matrix_folder, db_folder, row_file, col_file, write_to_file, out_fn, batch_size, print_to_screen, sep);
     }
     else{
         std::cerr<<"No query types specified. Aborting...\n";
-        exit(-1);
+        exit(1);
     }
     
     return 0;

@@ -610,34 +610,11 @@ namespace pc_mat {
     // }
 
 
-    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::string row_file, std::string col_file,
-                std::vector<std::string>& row_vec, std::vector<std::string>& col_vec){
-        if (matrix_folder.empty()) {
-            cerr << "Error: --matrix_folder is required" << endl;
-        }
-
-        if (!fs::exists(matrix_folder)) {
-            cerr << "Error: Matrix folder does not exist: " << matrix_folder << endl;
-        }
-
-        // Ensure matrix_folder ends with '/'
-        if (!matrix_folder.empty() && matrix_folder.back() != '/' && matrix_folder.back() != '\\') {
-            matrix_folder += '/';
-        }
-
-        // Load vector identifiers and create mapping
-        vector<string> identifiers;
-        unordered_map<string, int> id_to_index = load_vector_identifiers(matrix_folder, identifiers);
-
-        vector<float> vector_norms;
-        load_vector_norms(matrix_folder, vector_norms);
-        
-        int total_vectors = identifiers.size();
-        std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;
-        if (total_vectors <= 0) {
-            cerr << "Error: Could not determine total number of vectors" << endl;
-        }
-
+    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::vector<int32_t>& row_queries_vec, 
+        std::vector<int32_t>& col_queries_vec, int32_t total_vectors,
+        // FIXME: Remove vector norms, and get rid of this version
+        std::vector<float>& vector_norms
+    ){
         // Discover number of shards
         int num_shards = discover_shards(matrix_folder);
         // num_shards = 100;
@@ -646,35 +623,9 @@ namespace pc_mat {
             cerr << "Error: No shard folders found in " << matrix_folder << endl;
         }
 
-        // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
-
-        // auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
-        // exit(0);
-
-
-        // Determine queries
-        // vector<int> queries;
-        vector<int32_t> row_queries_vec, col_queries_vec;
-        
-        
-        row_queries_vec = read_queries_from_file(row_file, id_to_index, row_vec);
-        col_queries_vec = read_queries_from_file(col_file, id_to_index, col_vec);
-
-        // for(size_t i=0; i<row_queries_vec.size(); i++){
-        //     std::cout<<row_queries_vec[i]<<" ";
-        // }
-        // std::cout<<std::endl;
-        // for(size_t i=0; i<col_queries_vec.size(); i++){
-        //     std::cout<<col_queries_vec[i]<<" ";
-        // }
-        // std::cout<<std::endl;
-
-        if (row_queries_vec.empty() || col_queries_vec.empty()) {
-            cerr << "Error: No valid queries found" << endl;
-        }
-
         // Query all at once using load_neighbors_for_rows
-        vector<std::vector<int64_t> > all_neighbors = load_neighbors_for_slice(matrix_folder, row_queries_vec, col_queries_vec, total_vectors, num_shards);
+        vector<std::vector<int64_t> > all_neighbors = load_neighbors_for_slice(matrix_folder, row_queries_vec, 
+            col_queries_vec, total_vectors, num_shards);
 
         vector<std::vector<float> > all_results(row_queries_vec.size());
 
@@ -688,21 +639,20 @@ namespace pc_mat {
             }
 
             std::vector<int64_t>& neighbors = all_neighbors[q];
-
-            if (neighbors.empty()) {
-                // No neighbors found in database
-                std::vector<float> res;
+            
+            std::vector<float> res;
+            if(neighbors.empty()){
                 for(size_t i=0; i<col_queries_vec.size(); i++) res.push_back(0);
-                all_results[q] = std::move(res);
-            } else {
+            }
+            else{
                 // cout << "  Found " << neighbors.neighbor_indices.size() << " neighbors:" << endl;
+                assert(neighbors.size() == col_queries_vec.size());
                 // Pair each neighbor index with its value (intersection size)
                 vector<pair<int64_t, int64_t>> neighbor_pairs;
                 for (size_t i = 0; i < neighbors.size(); ++i) {
                     neighbor_pairs.emplace_back(col_queries_vec[i], neighbors[i]);
                 }
                 
-                std::vector<float> res;
                 for (const auto& [neighbor_idx, intersection] : neighbor_pairs) {
                     // string neighbor_id = (neighbor_idx < total_vectors) ? identifiers[neighbor_idx] : "UNKNOWN";
                     float norm_a = vector_norms[query_row]*vector_norms[query_row];
@@ -716,8 +666,9 @@ namespace pc_mat {
                         //     << " jaccard=" << jaccard  << " size of the datasets= " << norm_a << " " <<norm_b << endl;
                     // }
                 }
-                all_results[q] = std::move(res);
             }
+            all_results[q] = std::move(res);
+            
             // cout << endl;
         }
         return all_results;

@@ -101,6 +101,8 @@ namespace pc_mat{
     std::vector<Result> query(string matrix_folder, vector<int>& queries, 
         std::vector<float>& vector_norms, std::vector<string>& identifiers);
     
-    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::string row_file, std::string col_file,
-                std::vector<std::string>& row_vec, std::vector<std::string>& col_vec);
+    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::vector<int32_t>& row_vec, 
+        std::vector<int32_t>& col_vec, int32_t total_vectors,
+        std::vector<float>& vector_norms
+    );
 } // namespace pc_mat

@@ -33,10 +33,28 @@ else()
     message(WARNING "Eigen not found in standard paths; please set EIGEN_INCLUDE_DIR manually")
 endif()
 
-include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/include
+${CMAKE_SOURCE_DIR}/include/
+
+)
 
 # ==== Bits library ====
 add_subdirectory(bits)
+
+# ==== cnpy ====
+set(ZLIB_ROOT /scratch/mqa6002/software/local/zlib)
+set(ZLIB_INCLUDE_DIR "${ZLIB_ROOT}/include")
+set(ZLIB_LIBRARY "${ZLIB_ROOT}/lib/libz.a")
+
+find_package(ZLIB REQUIRED)
+# target_link_libraries(cnpy PUBLIC ZLIB::ZLIB)
+
+add_library(cnpy ${CMAKE_SOURCE_DIR}/include/cnpy/cnpy.cpp)
+target_include_directories(cnpy PUBLIC 
+    ${CMAKE_SOURCE_DIR}/include/cnpy/
+     ${ZLIB_INCLUDE_DIR} 
+)
+target_link_libraries(cnpy PUBLIC ${ZLIB_LIBRARY})
 
 # ==== Executables ====
 add_executable(project_everything
@@ -110,7 +128,7 @@ target_link_libraries(pc_mat_cmp_lib PUBLIC
 add_executable(query_pc_mat
     src/query_pc_mat.cpp
 )
-target_link_libraries(query_pc_mat PRIVATE pc_mat_lib)
+target_link_libraries(query_pc_mat PRIVATE pc_mat_lib cnpy)
 
 
 add_executable(query_pc_mat_cmp
@@ -119,7 +137,7 @@ add_executable(query_pc_mat_cmp
 target_link_directories(query_pc_mat_cmp PRIVATE
     /scratch/mqa6002/software/local/lib/
 )
-target_link_libraries(query_pc_mat_cmp PRIVATE pc_mat_cmp_lib)
+target_link_libraries(query_pc_mat_cmp PRIVATE pc_mat_cmp_lib cnpy)
 
 
 # ==== Optional Clean target ====
