@@ -2,6 +2,7 @@
 
 #include <thread>
 #include <chrono>
+#include <cassert>
 
 namespace fs = std::filesystem;
 
@@ -255,6 +256,7 @@ namespace pc_mat {
                 int current_col = 0;
                 for (int i = 0; i < number_of_neighbors; ++i) {
                     current_col += neighbor_differences[i];
+                    assert(current_col >= 0);
                     result.neighbor_indices[i] = current_col;
                     result.neighbor_values[i] = neighbor_values[i];
                 }
@@ -722,37 +724,9 @@ namespace pc_mat {
     }
 
 
-    vector<Result> query(string matrix_folder, std::string db_folder, string query_file, std::vector<string>& query_ids_str){
-        if (matrix_folder.empty()) {
-            cerr << "Error: --matrix_folder is required" << endl;
-        }
-
-        if (!fs::exists(matrix_folder)) {
-            cerr << "Error: Matrix folder does not exist: " << matrix_folder << endl;
-        }
-
-        // Ensure matrix_folder ends with '/'
-        if (!matrix_folder.empty() && matrix_folder.back() != '/' && matrix_folder.back() != '\\') {
-            matrix_folder += '/';
-        }
-
-        if (!db_folder.empty() && db_folder.back() != '/' && db_folder.back() != '\\') {
-            matrix_folder += '/';
-        }
-
-        // Load vector identifiers and create mapping
-        vector<string> identifiers;
-        unordered_map<string, int> id_to_index = load_vector_identifiers(db_folder, identifiers);
-
-        vector<float> vector_norms;
-        load_vector_norms(db_folder, vector_norms);
+    vector<Result> query(string matrix_folder, 
+        vector<int>& queries, std::vector<float>& vector_norms, std::vector<string>& identifiers){
         
-        int total_vectors = identifiers.size();
-        std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;
-        if (total_vectors <= 0) {
-            cerr << "Error: Could not determine total number of vectors" << endl;
-        }
-
         // Discover number of shards
         int num_shards = discover_shards(matrix_folder);
         // num_shards = 100;
@@ -761,33 +735,8 @@ namespace pc_mat {
             cerr << "Error: No shard folders found in " << matrix_folder << endl;
         }
 
+        int32_t total_vectors = vector_norms.size();
         // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
-
-        // auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
-        // exit(0);
-
-
-        // Determine queries
-        vector<int> queries;
-        std::vector<std::string> query_id_vec;
-        
-        if (!query_file.empty()) {
-            queries = read_queries_from_file(query_file, id_to_index, query_id_vec);
-        } else if (!query_ids_str.empty()) {
-            // Convert command line query IDs
-            for (const string& query_str : query_ids_str) {
-                int index = parse_query_to_index(query_str, id_to_index);
-                if (index >= 0) {
-                    queries.push_back(index);
-                }
-            }
-        } else {
-            cerr << "Error: No queries specified. Use --query_file, --query_ids, or --stdin" << endl;
-        }
-
-        if (queries.empty()) {
-            cerr << "Error: No valid queries found" << endl;
-        }
 
         // Query all at once using load_neighbors_for_rows
         vector<NeighborData> all_neighbors = load_neighbors_for_rows(matrix_folder, queries, total_vectors, num_shards);
@@ -817,7 +766,7 @@ namespace pc_mat {
                 // Jaccard = intersection / (|A| + |B| - intersection)
                 // |A| = vector_norms[query_row], |B| = vector_norms[neighbor_idx]
                 sort(neighbor_pairs.begin(), neighbor_pairs.end(), [&](const pair<int64_t, int64_t>& a, const pair<int64_t, int64_t>& b) {
-                    int idx_a = a.first, idx_b = b.first;
+                    int64_t idx_a = a.first, idx_b = b.first;
                     float norm_a = vector_norms[query_row]*vector_norms[query_row];
                     float norm_ba = vector_norms[idx_a]*vector_norms[idx_a];
                     float norm_bb = vector_norms[idx_b]*vector_norms[idx_b];

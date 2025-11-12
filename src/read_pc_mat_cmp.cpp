@@ -597,7 +597,7 @@ namespace pc_mat {
     std::vector<Neighbors> load_neighbors_for_rows_jaccard_wo_sort(
         const string& matrix_folder,
         const vector<int>& rows,
-        int total_vectors,
+        uint32_t total_vectors,
         int num_shards
     ) {
         // Map from shard index to query index
@@ -1112,40 +1112,9 @@ namespace pc_mat {
         return all_results;
     }
 
-    vector<Result> query(std::string matrix_folder, std::string db_folder, string query_file, std::vector<std::string>& query_ids_str){
-        bool read_from_stdin = false;
-        bool show_help = false;
-
-        if (matrix_folder.empty()) {
-            cerr << "Error: --matrix_folder is required" << endl;
-        }
-
-        if (!fs::exists(matrix_folder)) {
-            cerr << "Error: Matrix folder does not exist: " << matrix_folder << endl;
-        }
-
-        // Ensure matrix_folder ends with '/'
-        if (!matrix_folder.empty() && matrix_folder.back() != '/' && matrix_folder.back() != '\\') {
-            matrix_folder += '/';
-        }
-
-        if (!db_folder.empty() && db_folder.back() != '/' && db_folder.back() != '\\') {
-            matrix_folder += '/';
-        }
-
-        // Load vector identifiers and create mapping
-        vector<string> identifiers;
-        unordered_map<string, int> id_to_index = load_vector_identifiers(db_folder, identifiers);
-
-        vector<float> vector_norms;
-        load_vector_norms(db_folder, vector_norms);
+    vector<Result> query(std::string matrix_folder, vector<int>& queries, 
+        std::vector<float>& vector_norms, std::vector<string>& identifiers){
         
-        int total_vectors = identifiers.size();
-        std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;
-        if (total_vectors <= 0) {
-            cerr << "Error: Could not determine total number of vectors" << endl;
-        }
-
         // Discover number of shards
         int num_shards = discover_shards(matrix_folder);
         // num_shards = 100;
@@ -1154,40 +1123,13 @@ namespace pc_mat {
         if (num_shards <= 0) {
             cerr << "Error: No shard folders found in " << matrix_folder << endl;
         }
-
-        cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
-
-        // auto ratios = compute_closest_neighbor_distance(matrix_folder, total_vectors, num_shards, identifiers);
-        // exit(0);
+        uint32_t total_vectors = vector_norms.size();
+        // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
 
         const double MULT_CONST = (1ULL << 8) - 1;
 
-        // Determine queries
-        vector<int> queries;
-        std::vector<std::string> query_id_vec;
-        
-        if (!query_file.empty()) {
-            queries = read_queries_from_file(query_file, id_to_index, query_id_vec);
-        } else if (!query_ids_str.empty()) {
-            // Convert command line query IDs
-            for (const string& query_str : query_ids_str) {
-                int index = parse_query_to_index(query_str, id_to_index);
-                if (index >= 0) {
-                    queries.push_back(index);
-                }
-            }
-        } else {
-            cerr << "Error: No queries specified. Use --query_file, --query_ids" << endl;
-        }
-
-        if (queries.empty()) {
-            cerr << "Error: No valid queries found" << endl;
-            return vector<Result>{};
-        }
-
         // Query all at once using load_neighbors_for_rows
-        std::vector<Neighbors> all_neighbors = load_neighbors_for_rows_jaccard_wo_sort(matrix_folder, queries, 
-            total_vectors, num_shards);
+        std::vector<Neighbors> all_neighbors = load_neighbors_for_rows_jaccard_wo_sort(matrix_folder, queries, total_vectors, num_shards);
 
         vector<Result> all_results(queries.size());
         for (size_t q = 0; q < queries.size(); ++q) {

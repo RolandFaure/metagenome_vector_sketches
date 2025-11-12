@@ -98,7 +98,9 @@ namespace pc_mat{
         vector<float> jaccard_similarities;
     };
 
-    vector<Result> query(string matrix_folder, std::string db_folder, string query_file, std::vector<string>& query_ids_str);
+    std::vector<Result> query(string matrix_folder, vector<int>& queries, 
+        std::vector<float>& vector_norms, std::vector<string>& identifiers);
+    
     std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::string row_file, std::string col_file,
-                    std::vector<std::string>& row_vec, std::vector<std::string>& col_vec);
+                std::vector<std::string>& row_vec, std::vector<std::string>& col_vec);
 } // namespace pc_mat
