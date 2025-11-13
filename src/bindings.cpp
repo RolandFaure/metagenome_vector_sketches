@@ -43,9 +43,21 @@ py::list vector_to_pylist(const std::vector<std::string> &vec) {
 
 
 // Binding function exposed to Python
-py::list query_py(std::string matrix_folder, std::string query_file) {
-    std::vector<std::string> query_ids_str; // just a placeholder for now
-    std::vector<pc_mat::Result> results = pc_mat::query(matrix_folder, query_file, query_ids_str);
+py::list query_py(std::string matrix_folder, std::string db_folder, std::string query_file) {
+    std::vector<string> identifiers;
+    unordered_map<string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
+    
+    std::vector<int32_t> queries;
+    std::vector<std::string> query_ids_str;
+    
+    queries = pc_mat::read_queries_from_file(query_file, id_to_index, query_ids_str);
+    
+    // int total_vectors = identifiers.size();
+
+    std::vector<float> vector_norms;
+    pc_mat::load_vector_norms(db_folder, vector_norms);
+
+    std::vector<pc_mat::Result> results = pc_mat::query(matrix_folder, queries, vector_norms, identifiers);
     py::list all_results;
     for (const auto &res : results) {
         py::dict res_dict;
@@ -57,9 +69,22 @@ py::list query_py(std::string matrix_folder, std::string query_file) {
     return all_results;
 }
 
-py::dict query_sliced_py(std::string matrix_folder, std::string row_file, std::string col_file) {
-    std::vector<std::string> row_vec, col_vec; // just a placeholder for now
-    std::vector<std::vector<float>> results = pc_mat::query_sliced(matrix_folder, row_file, col_file, row_vec, col_vec);
+py::dict query_sliced_py(std::string matrix_folder, std::string db_folder, std::string row_file, std::string col_file) {
+    std::vector<string> identifiers;
+    unordered_map<string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
+    
+    std::vector<int32_t> row_query_vec, col_query_vec;
+    std::vector<std::string> row_vec, col_vec;
+    
+    row_query_vec = pc_mat::read_queries_from_file(row_file, id_to_index, row_vec);
+    col_query_vec = pc_mat::read_queries_from_file(col_file, id_to_index, col_vec);
+
+    int total_vectors = identifiers.size();
+
+    std::vector<float> vector_norms;
+    pc_mat::load_vector_norms(db_folder, vector_norms);
+
+    std::vector<std::vector<float>> results = pc_mat::query_sliced(matrix_folder, row_query_vec, col_query_vec, total_vectors, vector_norms);
     
     py::list row_list, col_list;
     for(const auto& row: row_vec) row_list.append(row);
@@ -87,15 +112,15 @@ PYBIND11_MODULE(read_pc_mat_module, m) {
     
     m.def("query", 
         &query_py, 
-        py::arg("matrix_folder"), py::arg("query_file"),
-        "Compute neighbors for queries in the given matrix folder and query file / ids;"
+        py::arg("matrix_folder"), py::arg("db_folder"), py::arg("query_file"),
+        "Compute neighbors for queries in the given matrix folder, database folder and query file / ids;"
         " returns a list of dictionaries with neighbor IDs and jaccard similarities."
     );
 
     m.def("query_sliced",
         &query_sliced_py, 
-        py::arg("matrix_folder"), py::arg("row_file"), py::arg("col_file"),
-        "Compute neighbors for queries in the given matrix folder and from the corresponding row-col files;"
+        py::arg("matrix_folder"), py::arg("db_folder"), py::arg("row_file"), py::arg("col_file"),
+        "Compute neighbors for queries in the given matrix folder, database folder and from the corresponding row-col files;"
         " returns a dictionary containing row, col IDS and their corresponding jaccard similarities."
     );
 }

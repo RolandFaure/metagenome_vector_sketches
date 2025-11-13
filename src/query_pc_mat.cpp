@@ -165,7 +165,10 @@ void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::
             }
             
             if(write_to_file && sep == "-1"){
-                cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "a");
+                if(start_indx == 0 && i == 0)
+                    cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "w");
+                else
+                    cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "a");
             }
             
             if(print_to_screen) std::cout << std::endl;
@@ -212,7 +215,7 @@ int main(int argc, char* argv[]) {
     bool use_row_col_files = false;
 
     auto cli = (
-        clipp::option("--matrix_folder") & clipp::value("folder", matrix_folder),
+        clipp::option("--matrix") & clipp::value("folder", matrix_folder),
         clipp::option("--db") & clipp::value("folder", db_folder),
         (
             (clipp::option("--query_file").set(use_query_file) & clipp::value("file", query_file)) |
@@ -232,10 +235,10 @@ int main(int argc, char* argv[]) {
     );
 
     if (!clipp::parse(argc, argv, cli) || show_help) {
-        cout << "Query Ava Matrix - Find neighbors in pairwise similarity matrix\n\n";
+        cout << "Query Pairwise Comparison Matrix\n\n";
         cout << "Usage:\n" << clipp::usage_lines(cli, argv[0]) << "\n\n";
         cout << "Options:\n";
-        cout << "  --matrix_folder  Folder containing the pairwise matrix files\n";
+        cout << "  --matrix  Folder containing the pairwise matrix files\n";
         cout << "  --db  Folder containing the matrix meta data\n";
         cout << "  --query_file     File containing query IDs (one per line)\n";
         cout << "  --query_ids      Query IDs as command line arguments (numeric indices or identifiers)\n";
@@ -254,7 +257,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (matrix_folder.empty()) {
-        show_error_and_exit("Error: --matrix_folder is required.");
+        show_error_and_exit("Error: matrix folder is required.");
     }
     if(!use_query_file && !use_query_ids && !use_row_col_files){
         show_error_and_exit("No query files given.");

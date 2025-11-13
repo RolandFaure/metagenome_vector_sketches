@@ -122,42 +122,42 @@ target_link_directories(pc_mat_cmp_lib PRIVATE
 )
 target_link_libraries(pc_mat_cmp_lib PUBLIC 
     BITS
-    streamvbyte
+    # streamvbyte
 )
+
+# add_executable(query_pc_mat
+#     src/query_pc_mat.cpp
+# )
+# target_link_libraries(query_pc_mat PRIVATE pc_mat_lib cnpy)
+
 
 add_executable(query_pc_mat
     src/query_pc_mat.cpp
 )
-target_link_libraries(query_pc_mat PRIVATE pc_mat_lib cnpy)
-
-
-add_executable(query_pc_mat_cmp
-    src/query_pc_mat.cpp
-)
-target_link_directories(query_pc_mat_cmp PRIVATE
+target_link_directories(query_pc_mat PRIVATE
     /scratch/mqa6002/software/local/lib/
 )
-target_link_libraries(query_pc_mat_cmp PRIVATE pc_mat_cmp_lib cnpy)
+target_link_libraries(query_pc_mat PRIVATE pc_mat_cmp_lib cnpy)
 
 
 # ==== Optional Clean target ====
 add_custom_target(clean-all
     COMMAND ${CMAKE_BUILD_TOOL} clean
-    COMMAND ${CMAKE_COMMAND} -E rm -f project_everything standalone_projection pairwise_comp_optimized query_ava_matrix
+    COMMAND ${CMAKE_COMMAND} -E rm -f project_everything standalone_projection pairwise_comp_optimized query_ava_matrix query_pc_mat 
 )
 
 
 # ==== Python bindings ====
-# find_package(Python COMPONENTS Interpreter Development REQUIRED)
-# find_package(pybind11 CONFIG REQUIRED)  # prefer installed pybind11 config
-# # If the above fails, install pybind11 or use the pybind11 header-only fallback.
+find_package(Python COMPONENTS Interpreter Development REQUIRED)
+find_package(pybind11 CONFIG REQUIRED)  # prefer installed pybind11 config
+# If the above fails, install pybind11 or use the pybind11 header-only fallback.
 
-# pybind11_add_module(read_pc_mat_module src/bindings.cpp)
-# target_link_libraries(read_pc_mat_module PRIVATE pc_mat_lib)
+pybind11_add_module(read_pc_mat_module src/bindings.cpp)
+target_link_libraries(read_pc_mat_module PRIVATE pc_mat_cmp_lib)
 
-# set_target_properties(read_pc_mat_module PROPERTIES
-#     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src
-# )
+set_target_properties(read_pc_mat_module PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src
+)
 
-# # Optionally set optimization flags
-# target_compile_options(read_pc_mat_module PRIVATE -O3 -march=native)
+# Optionally set optimization flags
+target_compile_options(read_pc_mat_module PRIVATE -O3 -march=native)

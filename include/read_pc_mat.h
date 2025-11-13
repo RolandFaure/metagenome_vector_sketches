@@ -77,20 +77,20 @@ namespace pc_mat{
     // Read queries from stdin
     vector<int> read_queries_from_stdin(const unordered_map<string, int>& id_to_index) ;
 
-    vector<double> compute_closest_neighbor_distance(
-        const string& matrix_folder,
-        int total_vectors,
-        int num_shards,
-        vector<string> identifiers
-    );
+    // vector<double> compute_closest_neighbor_distance(
+    //     const string& matrix_folder,
+    //     int total_vectors,
+    //     int num_shards,
+    //     vector<string> identifiers
+    // );
 
-    unordered_map<int, vector<int>> get_neighbors_above_threshold(
-        const string& matrix_folder,
-        int total_vectors,
-        int num_shards,
-        vector<float> vector_norms,
-        double threshold = 0.3
-    );
+    // unordered_map<int, vector<int>> get_neighbors_above_threshold(
+    //     const string& matrix_folder,
+    //     int total_vectors,
+    //     int num_shards,
+    //     vector<float> vector_norms,
+    //     double threshold = 0.3
+    // );
 
     struct Result {
         string self_id;
