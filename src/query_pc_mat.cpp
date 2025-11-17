@@ -2,6 +2,7 @@
 #include "clipp.h"
 #include "cnpy.h"
 #include <cassert>
+#include <cmath>
 
 namespace fs = std::filesystem;
 
@@ -10,6 +11,28 @@ void show_error_and_exit(std::string msg){
     std::cerr<<msg<<std::endl;
     std::cerr<<"Aborting...\n";
     exit(1);
+}
+
+double roundUpToTwoDecimals(double num) {
+  return std::ceil(num * 100.0) / 100.0;
+}
+
+std::pair<double, std::string> get_time_unit(double total_time){
+    if(total_time < 60){
+        // return std::to_string(static_cast<uint64_t>( std::ceil(total_time)))+"\t seconds";
+        return std::make_pair(total_time, "seconds");
+        // return std::to_string(roundUpToTwoDecimals(total_time))+"\t seconds";
+    }
+    else if(total_time < 60*60){
+        total_time/=60.0;
+        // return std::to_string(static_cast<uint64_t>( std::ceil(total_time)))+"\t minutes";
+        return std::make_pair(total_time, "minutes");
+    }
+    else{
+        total_time/=(60.0*60);
+        // return std::to_string(static_cast<uint64_t>( std::ceil(total_time)))+"\t hours";
+        return std::make_pair(total_time, "hours");
+    }
 }
 
 void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, std::string query_file,
@@ -90,11 +113,15 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
             if(print_to_screen) std::cout << std::endl;
             out.close();
         }
+        auto time_unit = get_time_unit(elapsed.count());
+        std::cout<<"--------- Completed\t"<<end_indx<<"\tqueries in\t"<<std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<<" ---------\n";
         if(end_indx == queries.size()) break;
         start_indx += batch_size;
     }    
 
-    std::cout << "Query completed in " << elapsed.count() << " seconds.\n" << std::endl;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "Query completed in "<<std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<< "\n" << std::endl;
 }
 
 void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::string row_file, std::string col_file,
@@ -154,8 +181,8 @@ void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::
         for(int i=0; i< all_results.size(); i++){
             std::vector<float> & res = all_results[i];
             
-            if(print_to_screen) std::cout<<row_vec[i]<<"\t";
-            if(write_to_file && sep != "-1") out<<row_vec[i]<<sep;
+            if(print_to_screen) std::cout<<row_vec[start_indx + i]<<"\t";
+            if(write_to_file && sep != "-1") out<<row_vec[start_indx + i]<<sep;
             
             if(print_to_screen || (write_to_file && sep != "-1")){
                 for (size_t j = 0; j < res.size(); ++j) {
@@ -175,11 +202,16 @@ void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::
             if(write_to_file && sep != "-1") out<<"\n";
         }
         
+        auto time_unit = get_time_unit(elapsed.count());
+        std::cout<<"--------- Completed\t"<<end_indx<<"\trows in\t"<<std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<<" ---------\n";
+        
         if(end_indx == row_query_vec.size()) break;
         start_indx += batch_size;
     }
 
-    std::cout << "Query completed in " << elapsed.count() << " seconds.\n" << std::endl;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "Query completed in " << std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<<"\n" << std::endl;
 
     if(write_to_file && sep != "-1") out.close();
 }
@@ -201,13 +233,13 @@ int main(int argc, char* argv[]) {
     string query_file;
     std::string row_file, col_file;
     // string neighbor_fn = "neighbors.txt";
-    uint32_t top_n = 10, batch_size = 100;
+    uint32_t top_n = 10, batch_size = 1000;
     vector<string> query_ids_str;
     bool read_from_stdin = false;
     bool show_help = false;
     bool write_to_file = false;
     std::string out_fn = "out.txt";
-    bool print_to_screen = true;
+    bool print_to_screen = false;
     bool show_all_neighbors = false;
     
     bool use_query_file = false;
@@ -230,7 +262,7 @@ int main(int argc, char* argv[]) {
         clipp::option("--batch_size") & clipp::value("int", batch_size),
         clipp::option("--write_to_file").set(write_to_file) & clipp::value("file", out_fn),
         clipp::option("--show_all").set(show_all_neighbors),
-        // clipp::option("--print").set(print_to_screen),
+        clipp::option("--print").set(print_to_screen),
         clipp::option("--help").set(show_help)
     );
 
@@ -238,18 +270,19 @@ int main(int argc, char* argv[]) {
         cout << "Query Pairwise Comparison Matrix\n\n";
         cout << "Usage:\n" << clipp::usage_lines(cli, argv[0]) << "\n\n";
         cout << "Options:\n";
-        cout << "  --matrix  Folder containing the pairwise matrix files\n";
-        cout << "  --db  Folder containing the matrix meta data\n";
-        cout << "  --query_file     File containing query IDs (one per line)\n";
-        cout << "  --query_ids      Query IDs as command line arguments (numeric indices or identifiers)\n";
-        cout << "  --row_file     File containing query row IDs (one per line)\n";
-        cout << "  --col_file     File containing query col IDs (one per line)\n";
+        cout << "  --matrix\t Folder containing the pairwise matrix files\n";
+        cout << "  --db\t Folder containing the matrix meta data\n";
+        cout << "  --query_file\t File containing query IDs (one per line)\n";
+        cout << "  --query_ids\t Query IDs as command line arguments (numeric indices or identifiers)\n";
+        cout << "  --row_file\t File containing query row IDs (one per line)\n";
+        cout << "  --col_file\t File containing query col IDs (one per line)\n";
         // cout << "  --stdin          Read query IDs from standard input\n";
-        cout << "  --top           Number of top jaccard values to show [default 10]\n";
-        cout << "  --batch_size    Number of queries to process per batch [default 100]\n";
-        cout << "  --write_to_file  Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz for row-col query. *.csv/*tsv/*txt for regular query).\n";
-        cout << "  --show_all  Whether to show all neighbors instead of top N\n";
-        cout << "  --help           Show this help message\n\n";
+        cout << "  --top\t Number of top jaccard values to show [default 10]\n";
+        cout << "  --batch_size\t Number of queries to process per batch [default 1000]\n";
+        cout << "  --write_to_file\t Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz for row-col query. *.csv/*tsv/*txt for regular query).\n";
+        cout << "  --show_all\t Whether to show all neighbors instead of top N\n";
+        cout << "  --print\t Whether to print the outputs to screen\n";
+        cout << "  --help\t Show this help message\n\n";
         // cout << "Examples:\n";
         // cout << "  " << argv[0] << " --matrix_folder ./results --query_ids SRR123456 SRR789012\n";
         // cout << "  " << argv[0] << " --matrix_folder ./results --query_file queries.txt\n";
@@ -279,6 +312,8 @@ int main(int argc, char* argv[]) {
     if(write_to_file && out_fn.empty()){
         show_error_and_exit("No output filename given.");
     }
+
+    if(!write_to_file) print_to_screen = true;
 
     if(use_query_file || use_query_ids){
         std::string file_extension = get_file_extension(out_fn);

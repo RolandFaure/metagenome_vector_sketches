@@ -82,32 +82,33 @@ Query Pairwise Comparison Matrix
 Usage:
         ../build/query_pc_mat [--matrix <folder>] [--db <folder>] [--query_file <file>] [--top
                               <int>] [--batch_size <int>] [--write_to_file <file>] [--show_all]
-                              [--help]
+                              [--print] [--help]
 
         ../build/query_pc_mat [--matrix <folder>] [--db <folder>] [--query_ids <ids>...] [--top
                               <int>] [--batch_size <int>] [--write_to_file <file>] [--show_all]
-                              [--help]
+                              [--print] [--help]
 
         ../build/query_pc_mat [--matrix <folder>] [--db <folder>] [--row_file <row> [--col_file]
                               <col>] [--top <int>] [--batch_size <int>] [--write_to_file <file>]
-                              [--show_all] [--help]
+                              [--show_all] [--print] [--help]
 
 Options:
-  --matrix  Folder containing the pairwise matrix files
-  --db  Folder containing the matrix meta data
-  --query_file     File containing query IDs (one per line)
-  --query_ids      Query IDs as command line arguments (numeric indices or identifiers)
+  --matrix       Folder containing the pairwise matrix files
+  --db   Folder containing the matrix meta data
+  --query_file   File containing query IDs (one per line)
+  --query_ids    Query IDs as command line arguments (numeric indices or identifiers)
   --row_file     File containing query row IDs (one per line)
   --col_file     File containing query col IDs (one per line)
-  --top           Number of top jaccard values to show [default 10]
-  --batch_size    Number of queries to process per batch [default 100]
-  --write_to_file  Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz for row-col query. *.csv/*tsv/*txt for regular query).
-  --show_all  Whether to show all neighbors instead of top N
-  --help           Show this help message
+  --top  Number of top jaccard values to show [default 10]
+  --batch_size   Number of queries to process per batch [default 1000]
+  --write_to_file        Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz for row-col query. *.csv/*tsv/*txt for regular query).
+  --show_all     Whether to show all neighbors instead of top N
+  --print        Whether to print the outputs to screen
+  --help         Show this help message
 
 ```
 
-**To query from all accessions inside the server, use `--matrix /scratch/mgs_project/matrix/ --db /scratch/mgs_project/db/`**
+**To query from all accessions inside the server, use `--matrix /scratch/mgs_project/matrix_unzipped/ --db /scratch/mgs_project/db/`**
 
 #### Regular Query (Nearest Neighbors)
 

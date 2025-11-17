@@ -13,16 +13,16 @@ namespace fs = std::filesystem;
 
 namespace pc_mat {
     void decompress_zstd_files(const string& folder) {
-        string cmd = "cd " + folder + " && zstd -f -d *.zst 2>/dev/null || true";
-        system(cmd.c_str());
+        // string cmd = "cd " + folder + " && zstd -f -d *.zst 2>/dev/null || true";
+        // system(cmd.c_str());
     }
 
     // Function to clean up all decompressed files
     void cleanup_decompressed_files(const string& folder) {
         // Remove decompressed .bin and .txt files, keeping only .zst files
         // string cmd = "cd " + folder + " && rm -f matrix.bin row_index.bin 2>/dev/null || true";
-        string cmd = "cd " + folder + " && rm -f matrix.bin row_index.bin neighbor_start.bin vbyte.bin 2>/dev/null || true";
-        system(cmd.c_str());
+        // string cmd = "cd " + folder + " && rm -f matrix.bin row_index.bin neighbor_start.bin vbyte.bin 2>/dev/null || true";
+        // system(cmd.c_str());
     }
 
     // Load vector identifiers and create mapping from identifier to index
@@ -615,7 +615,7 @@ namespace pc_mat {
             // std::cout<<"shard: "<<shard_idx<<std::endl;
             
             std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
-            decompress_zstd_files(shard_folder);
+            // decompress_zstd_files(shard_folder);
             const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map_jaccard(shard_folder);
             assert(!row_to_indx_add_map.empty());
             
@@ -665,7 +665,7 @@ namespace pc_mat {
                 }
                 results[query_index] = std::move(result);
             }
-            cleanup_decompressed_files(shard_folder);
+            // cleanup_decompressed_files(shard_folder);
         }
         return results;
     }
@@ -1192,7 +1192,7 @@ namespace pc_mat {
             string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
 
             // Decompress files in this shard
-            decompress_zstd_files(shard_folder);
+            // decompress_zstd_files(shard_folder);
 
             // Load the row index for this shard
             const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map_jaccard(shard_folder);
@@ -1253,7 +1253,7 @@ namespace pc_mat {
                 }
                 results[query_index] = std::move(result);
             }
-            cleanup_decompressed_files(shard_folder);
+            // cleanup_decompressed_files(shard_folder);
         }
 
         return results;
