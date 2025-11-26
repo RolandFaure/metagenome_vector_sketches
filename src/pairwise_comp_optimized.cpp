@@ -65,60 +65,79 @@ SparseResult compute_sparse_dot_products_optimized(
     local_rows.reserve(1000);
     local_cols.reserve(1000);
     local_values.reserve(1000);
+
+    result.rows.reserve(10000);
+    result.cols.reserve(10000);
+    result.values.reserve(10000);
     
-    // // Aggressively optimized dot product computation for CPU (cache, SIMD, OpenMP)
-    // #pragma omp for schedule(dynamic, 4) collapse(1)
-    // for (int i = 0; i < block_i.cols(); ++i) {
-    //     const int* col_i = &block_i(0, i);
+    // Aggressively optimized dot product computation for CPU (cache, SIMD, OpenMP)
+    #pragma omp for schedule(dynamic, 4) collapse(1)
+    for (int i = 0; i < block_i.cols(); ++i) {
+        const int* col_i = &block_i(0, i);
 
-    //     // Prefetch next column of block_i to L1 cache (if available)
-    //     if (i + 1 < block_i.cols()) {
-    //         __builtin_prefetch(&block_i(0, i + 1), 0, 1);
-    //     }
+        // Prefetch next column of block_i to L1 cache (if available)
+        if (i + 1 < block_i.cols()) {
+            __builtin_prefetch(&block_i(0, i + 1), 0, 1);
+        }
 
-    //     for (int j = 0; j < block_j.cols(); ++j) {
-    //         const int* col_j = &block_j(0, j);
+        for (int j = 0; j < block_j.cols(); ++j) {
+            const int* col_j = &block_j(0, j);
 
-    //         // Prefetch next column of block_j to L1 cache (if available)
-    //         if (j + 1 < block_j.cols()) {
-    //             __builtin_prefetch(&block_j(0, j + 1), 0, 1);
-    //         }
+            // Prefetch next column of block_j to L1 cache (if available)
+            if (j + 1 < block_j.cols()) {
+                __builtin_prefetch(&block_j(0, j + 1), 0, 1);
+            }
 
-    //         double threshold = 0.05 * (norms_i(i) + norms_j(j)); // norms are squared
 
-    //         int64_t dot_product = 0;
-    //         int k = 0;
+            int64_t dot_product = 0;
+            int k = 0;
 
-    //         // SIMD-friendly loop: process in chunks of 8 (if possible)
-    //         #if defined(__AVX2__)
-    //             __m256i acc = _mm256_setzero_si256();
-    //         for (; k <= dimension - 8; k += 8) {
-    //             __m256i vi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_i[k]));
-    //             __m256i vj = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_j[k]));
-    //             __m256i prod = _mm256_mullo_epi32(vi, vj);
-    //             acc = _mm256_add_epi32(acc, prod);
-    //         }
-    //         // Horizontal sum of acc
-    //         alignas(32) int32_t tmp[8];
-    //         _mm256_store_si256(reinterpret_cast<__m256i*>(tmp), acc);
-    //         for (int t = 0; t < 8; ++t) dot_product += tmp[t];
-    //         #endif
+            // SIMD-friendly loop: process in chunks of 8 (if possible)
+            #if defined(__AVX2__)
+                __m256i acc = _mm256_setzero_si256();
+            for (; k <= dimension - 8; k += 8) {
+                __m256i vi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_i[k]));
+                __m256i vj = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_j[k]));
+                __m256i prod = _mm256_mullo_epi32(vi, vj);
+                acc = _mm256_add_epi32(acc, prod);
+            }
+            // Horizontal sum of acc
+            alignas(32) int32_t tmp[8];
+            _mm256_store_si256(reinterpret_cast<__m256i*>(tmp), acc);
+            for (int t = 0; t < 8; ++t) dot_product += tmp[t];
+            #endif
 
-    //         // Fallback for remaining elements or non-AVX2
-    //         for (; k <= dimension - 4; k += 4) {
-    //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-    //             dot_product += static_cast<int64_t>(col_i[k+1]) * col_j[k+1];
-    //             dot_product += static_cast<int64_t>(col_i[k+2]) * col_j[k+2];
-    //             dot_product += static_cast<int64_t>(col_i[k+3]) * col_j[k+3];
-    //         }
-    //         for (; k < dimension; ++k) {
-    //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-    //         }
+            // Fallback for remaining elements or non-AVX2
+            for (; k <= dimension - 4; k += 4) {
+                dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
+                dot_product += static_cast<int64_t>(col_i[k+1]) * col_j[k+1];
+                dot_product += static_cast<int64_t>(col_i[k+2]) * col_j[k+2];
+                dot_product += static_cast<int64_t>(col_i[k+3]) * col_j[k+3];
+            }
+            for (; k < dimension; ++k) {
+                dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
+            }
 
-    //         // Early exit if dot_product cannot reach threshold (optional, for sparse data)
-    //         // Not implemented here due to integer overflow risk
+            // Early exit if dot_product cannot reach threshold (optional, for sparse data)
+            // Not implemented here due to integer overflow risk
 
-    //         if (static_cast<double>(dot_product) / dimension > threshold) {
+            double threshold = 0.05 * (norms_i(i) + norms_j(j)-static_cast<double>(dot_product) / dimension); // norms are squared
+
+            if (static_cast<double>(dot_product) / dimension > threshold) {
+                local_rows.push_back(i);
+                local_cols.push_back(j);
+                local_values.push_back(dot_product);
+            }
+        }
+    //}
+
+    // MatrixXi dot_products = block_i.transpose() * block_j;
+    // // Go through the solution and apply the threshold
+    // for (int i = 0; i < dot_products.rows(); ++i) {
+    //     for (int j = 0; j < dot_products.cols(); ++j) {
+    //         int64_t dot_product = dot_products(i, j);
+    //         double threshold = 0.05 * (norms_i(i) + norms_j(j)-dot_products(i, j));
+    //         if (dot_product / dimension > threshold) {
     //             local_rows.push_back(i);
     //             local_cols.push_back(j);
     //             local_values.push_back(dot_product);
@@ -126,29 +145,15 @@ SparseResult compute_sparse_dot_products_optimized(
     //     }
     // }
 
-    MatrixXi dot_products = block_i.transpose() * block_j;
-    // Go through the solution and apply the threshold
-    for (int i = 0; i < dot_products.rows(); ++i) {
-        for (int j = 0; j < dot_products.cols(); ++j) {
-            double threshold = 0.05 * (norms_i(i) + norms_j(j));
-            int64_t dot_product = dot_products(i, j);
-            if (dot_product / dimension > threshold) {
-                local_rows.push_back(i);
-                local_cols.push_back(j);
-                local_values.push_back(dot_product);
-            }
-        }
-    }
-
 
         // Combine results from all threads
         // #pragma omp critical
         // {
-    result.rows.insert(result.rows.end(), local_rows.begin(), local_rows.end());
-    result.cols.insert(result.cols.end(), local_cols.begin(), local_cols.end());
-    result.values.insert(result.values.end(), local_values.begin(), local_values.end());
+            // result.rows.insert(result.rows.end(), local_rows.begin(), local_rows.end());
+            // result.cols.insert(result.cols.end(), local_cols.begin(), local_cols.end());
+            // result.values.insert(result.values.end(), local_values.begin(), local_values.end());
         // }
-    // }
+    }
     
     return result;
 }

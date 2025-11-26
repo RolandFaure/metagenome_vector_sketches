@@ -5,6 +5,8 @@ project(RandomProjectionTools LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -ffast-math")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -funroll-loops -ftree-vectorize -mavx2 -mfma")
+
 
 # ==== OpenMP ====
 find_package(OpenMP)
@@ -48,6 +50,11 @@ add_executable(pairwise_comp_optimized
 )
 target_include_directories(pairwise_comp_optimized PRIVATE ${EIGEN_INCLUDE_DIR})
 
+add_executable(pairwise_comp_optimized_16
+    src/pairwise_comp_optimized_16.cpp
+)
+target_include_directories(pairwise_comp_optimized_16 PRIVATE ${EIGEN_INCLUDE_DIR})
+
 add_executable(query_ava_matrix
     src/query_ava_matrix.cpp
 )
@@ -73,11 +80,12 @@ target_link_libraries(query_pc_mat PRIVATE pc_mat_lib)
 # ==== Link libraries ====
 # Only pairwise_comp_optimized depends on the BITS library
 target_link_libraries(pairwise_comp_optimized PRIVATE BITS)
+target_link_libraries(pairwise_comp_optimized_16 PRIVATE BITS)
 
 # ==== Optional Clean target ====
 add_custom_target(clean-all
     COMMAND ${CMAKE_BUILD_TOOL} clean
-    COMMAND ${CMAKE_COMMAND} -E rm -f project_everything standalone_projection pairwise_comp_optimized query_ava_matrix
+    COMMAND ${CMAKE_COMMAND} -E rm -f project_everything standalone_projection pairwise_comp_optimized pairwise_comp_optimized_16 query_ava_matrix
 )
 
 

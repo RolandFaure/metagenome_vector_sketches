@@ -185,12 +185,11 @@ VectorXi transform_set_into_minHash_vector(const std::unordered_set<unsigned lon
     return vec;
 }
 
-
 int main(int argc, char* argv[]) {
-    // CLI with clipp
     int t = 1;
     int d = 2048;
     int strategy = 0;
+    bool use_int16 = true;
     std::string folder_name, index_folder;
 
     auto cli = (
@@ -198,12 +197,14 @@ int main(int argc, char* argv[]) {
         clipp::value("index_folder", index_folder),
         clipp::option("-t", "--threads") & clipp::integer("threads", t) % "Number of threads (default: 1)",
         clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)",
-        clipp::option("-s", "--strategy") & clipp::integer("strategy", strategy) % "0=random projections, 1=minHash (default: 0)"
+        clipp::option("-s", "--strategy") & clipp::integer("strategy", strategy) % "0=random projections, 1=minHash (default: 0)",
+        clipp::option("--int32").set(use_int16, false) % "Use int32 instead of int16 for output (only for strategy 0)"
     );
 
     if (!clipp::parse(argc, argv, cli)) {
-        std::cerr << "Usage: " << argv[0] << " <input_folder> <index_folder> [-t threads] [-d dimension] [-s strategy]\n";
+        std::cerr << "Usage: " << argv[0] << " <input_folder> <index_folder> [-t threads] [-d dimension] [-s strategy] [--int32]\n";
         std::cerr << "  strategy: 0=random projections, 1=minHash\n";
+        std::cerr << "  --int32: Use int32 instead of int16 for output (only for strategy 0)\n";
         return 1;
     }
 
@@ -265,7 +266,7 @@ int main(int argc, char* argv[]) {
     std::chrono::duration<double> elapsed = end - start;
     cout << "Time to compute all projected vectors: " << elapsed.count() << " seconds" << endl;
 
-    // Output norms and names to a text file, and all vectors as byte-packed int32 to a binary file
+    // Output norms and names to a text file, and all vectors as byte-packed int to a binary file
     std::ofstream norm_out(index_folder + "vector_norms.txt");
     std::ofstream dim_out(index_folder + "dimension.txt");
     std::ofstream bin_out(index_folder + "vectors.bin", std::ios::binary);
@@ -287,10 +288,27 @@ int main(int argc, char* argv[]) {
             VectorXf vec_f = pair.second.cast<float>() / std::sqrt(static_cast<float>(d));
             double norm = vec_f.norm();
             norm_out << base_name << " " << norm << "\n";
-            // Write vector as int32_t, byte-packed
-            for (int i = 0; i < vec.size(); ++i) {
-                int32_t val = static_cast<int32_t>(vec[i]);
-                bin_out.write(reinterpret_cast<const char*>(&val), sizeof(int32_t));
+            
+            // Write vector with chosen precision
+            if ((strategy == 0 && !use_int16) || strategy == 1) {
+                // Use int32
+                for (int i = 0; i < vec.size(); ++i) {
+                    int32_t val = static_cast<int32_t>(vec[i]);
+                    bin_out.write(reinterpret_cast<const char*>(&val), sizeof(int32_t));
+                }
+            } else {
+                // Use int16 (default for strategy 0, always for strategy 1)
+                for (int i = 0; i < vec.size(); ++i) {
+                    int16_t val;
+                    if (vec[i] > std::numeric_limits<int16_t>::max()) {
+                        val = std::numeric_limits<int16_t>::max();
+                    } else if (vec[i] < std::numeric_limits<int16_t>::min()) {
+                        val = std::numeric_limits<int16_t>::min();
+                    } else {
+                        val = static_cast<int16_t>(vec[i]);
+                    }
+                    bin_out.write(reinterpret_cast<const char*>(&val), sizeof(int16_t));
+                }
             }
             index_of_vector++;
         }
@@ -298,57 +316,6 @@ int main(int argc, char* argv[]) {
         bin_out.close();
         dim_out.close();
     }
-
-    // std::vector<std::pair<double, double>> jaccard_pairs;
-    // size_t count_above_01 = 0;
-    // for (size_t i = 0; i < all_hash_sets.size(); ++i) {
-    //     for (size_t j = i + 1; j < all_hash_sets.size(); ++j) {
-    //         size_t intersection = 0;
-    //         const auto& set1 = all_hash_sets[i];
-    //         const auto& set2 = all_hash_sets[j];
-    //         for (const auto& hash : set1) {
-    //             if (set2.count(hash)) ++intersection;
-    //         }
-    //         size_t union_size = set1.size() + set2.size() - intersection;
-    //         double jaccard = union_size == 0 ? 0.0 : static_cast<double>(intersection) / union_size;
-
-    //         vector<float> vec1 = all_projected_vectors[i].second;
-    //         int size_1 = all_projected_vectors[i].first;
-    //         vector<float> vec2 = all_projected_vectors[j].second;
-    //         int size_2 = all_projected_vectors[j].first;
-
-    //         // Compute squared Euclidean norm of the difference between the two vectors
-    //         double squared_norm = 0.0;
-    //         for (int k = 0; k < d; ++k) {
-    //             double diff = vec1[k] - vec2[k];
-    //             squared_norm += diff * diff;
-    //         }
-
-    //         double estimated_jaccard = (size_1 + size_2 - squared_norm) / (size_1 + size_2 + squared_norm);
-
-    //         jaccard_pairs.emplace_back(jaccard, estimated_jaccard);
-
-    //         if (jaccard >= 0.1){
-    //             cout << folder_names[i] << " vs " << folder_names[j] << ": " << jaccard
-    //                  << " : " << estimated_jaccard << endl;
-    //         }
-    //         if (jaccard > 0.1) ++count_above_01;
-    //     }
-    // }
-
-    // // Output each (x, y) pair to points.txt, one per line
-    // std::ofstream outfile("points.txt");
-    // if (!outfile) {
-    //     std::cerr << "Error opening points.txt for writing." << std::endl;
-    // } else {
-    //     for (const auto& pair : jaccard_pairs) {
-    //         if (pair.first >= 0.0){
-    //             outfile << pair.first << " " << pair.second << "\n";
-    //         }
-    //     }
-    //     outfile.close();
-    // }
-    // cout << "Number of pairwise Jaccard distances above 0.1: " << count_above_01 << endl;
 
     return 0;
 }
