@@ -95,7 +95,7 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
             std::ofstream out;
             if(write_to_file) {
                 std::string nfn = res.self_id+"_"+out_fn;
-                std::cout<<"Writing in file: "<<nfn<<std::endl<<std::endl;
+                if(print_to_screen) std::cout<<"Writing in file: "<<nfn<<std::endl<<std::endl;
                 out.open(nfn.c_str());
                 out<<"ID"+sep+"Jaccard\n";
             }
