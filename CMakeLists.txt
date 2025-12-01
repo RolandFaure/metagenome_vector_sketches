@@ -42,19 +42,18 @@ ${CMAKE_SOURCE_DIR}/include/
 add_subdirectory(bits)
 
 # ==== cnpy ====
-set(ZLIB_ROOT /scratch/mqa6002/software/local/zlib)
-set(ZLIB_INCLUDE_DIR "${ZLIB_ROOT}/include")
-set(ZLIB_LIBRARY "${ZLIB_ROOT}/lib/libz.a")
+# Use system zlib instead of hardcoded path
+# set(ZLIB_ROOT /scratch/mqa6002/software/local/zlib)
+# set(ZLIB_INCLUDE_DIR "${ZLIB_ROOT}/include")
+# set(ZLIB_LIBRARY "${ZLIB_ROOT}/lib/libz.a")
 
 find_package(ZLIB REQUIRED)
-# target_link_libraries(cnpy PUBLIC ZLIB::ZLIB)
 
 add_library(cnpy ${CMAKE_SOURCE_DIR}/include/cnpy/cnpy.cpp)
 target_include_directories(cnpy PUBLIC 
     ${CMAKE_SOURCE_DIR}/include/cnpy/
-     ${ZLIB_INCLUDE_DIR} 
 )
-target_link_libraries(cnpy PUBLIC ${ZLIB_LIBRARY})
+target_link_libraries(cnpy PUBLIC ZLIB::ZLIB)
 
 # ==== Executables ====
 add_executable(project_everything
@@ -82,7 +81,7 @@ target_link_directories(pairwise_comp_optimized PRIVATE
 )
 target_link_libraries(pairwise_comp_optimized PRIVATE 
     BITS
-    streamvbyte
+    # streamvbyte
 )
 
 # add_executable(pairwise_comp_optimized_vbyte

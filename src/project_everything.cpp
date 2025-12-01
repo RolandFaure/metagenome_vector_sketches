@@ -175,23 +175,11 @@ void load_signatures(std::string file_name, std::unordered_set<unsigned long int
     }
 }
 
-VectorXi transform_set_into_minHash_vector(const std::unordered_set<unsigned long int> &hashes, int d){
-    std::vector<unsigned long int> sorted_hashes(hashes.begin(), hashes.end());
-    std::sort(sorted_hashes.begin(), sorted_hashes.end());
-    VectorXi vec = VectorXi::Zero(d);
-    size_t n = std::min(static_cast<size_t>(d), sorted_hashes.size());
-    for (size_t i = 0; i < n; ++i) {
-        vec[i] = static_cast<int>(sorted_hashes[i]);
-    }
-    return vec;
-}
-
 
 int main(int argc, char* argv[]) {
     // CLI with clipp
     int t = 1;
     int d = 2048;
-    int strategy = 0;
     bool use_int16 = false;
     std::string folder_name, index_folder;
 
@@ -200,14 +188,20 @@ int main(int argc, char* argv[]) {
         clipp::value("index_folder", index_folder),
         clipp::option("-t", "--threads") & clipp::integer("threads", t) % "Number of threads (default: 1)",
         clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)",
-        clipp::option("-s", "--strategy") & clipp::integer("strategy", strategy) % "0=random projections, 1=minHash (default: 0)",
         clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
     );
 
     if (!clipp::parse(argc, argv, cli)) {
-        std::cerr << "Usage: " << argv[0] << " <input_folder> <index_folder> [-t threads] [-d dimension] [-s strategy] [--int16]\n";
-        std::cerr << "  strategy: 0=random projections, 1=minHash\n";
-        std::cerr << "  --int16: Use int16 instead of int32 for vector storage\n";
+
+        
+
+        std::cerr << "Error: Failed to parse command line arguments.\n";
+        std::cerr << "Usage: " << argv[0] << " <input_folder> <index_folder> [-t threads] [-d dimension] [--int16]\n";
+        std::cerr << "  input_folder   : Path to folder containing signature files\n";
+        std::cerr << "  index_folder   : Output folder for generated index files\n";
+        std::cerr << "  -t, --threads  : Number of threads (default: 1)\n";
+        std::cerr << "  -d, --dimension: Vector dimension (default: 2048)\n";
+        std::cerr << "  --int16        : Use int16 instead of int32 for vector storage\n";
         return 1;
     }
 
@@ -249,12 +243,7 @@ int main(int argc, char* argv[]) {
     for (size_t i = 0; i < sig_files.size(); ++i) {
         std::unordered_set<unsigned long int> hashes;
         load_signatures(sig_files[i], hashes, omp_get_thread_num());
-        if (strategy == 0){
-            temp_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_vector(hashes, d)};
-        }
-        else{
-            temp_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_minHash_vector(hashes, d)};
-        }
+        temp_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_vector(hashes, d)};
         #pragma omp critical
         {
             cout << "Processed " << sig_files[i] << ", hashes size " << hashes.size() << ", file number " << i << endl;
