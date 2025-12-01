@@ -10,6 +10,7 @@
 #include <filesystem>
 
 //#include <immintrin.h>
+#include "pairwise_comp_optimized_16bits.cpp"
 #include "elias_fano.hpp"
 #include "clipp.h"
 #include "rice_sequence.hpp"
@@ -1092,133 +1093,149 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Ensure output folder ends with '/'
-    if (!output_folder.empty() && output_folder.back() != '/' && output_folder.back() != '\\') {
-        output_folder += '/';
-    }
-
-    if (!db_folder.empty() && db_folder.back() != '/' && db_folder.back() != '\\') {
-        output_folder += '/';
-    }
-
-    matrix_file = db_folder + "vectors.bin";
-
-    string norms_file = db_folder + "vector_norms.txt";
-    if (!fs::exists(norms_file)) {
-        cerr << "Error: Required file 'vector_norms.txt' not found in output folder: " << db_folder << endl;
-        return 1;
-    }
-
-    vector<double> all_norms;
-    string line;
-    ifstream norms_in(norms_file);
-    while (getline(norms_in, line)) {
-        size_t pos = line.find(' ');
-        if (pos == string::npos) continue;
-        double norm = stod(line.substr(pos + 1));
-        all_norms.push_back(norm*norm);
-    }
-    // Calculate chunk size
-    int bytes_per_vector = dimension * sizeof(int32_t);
-    int64_t max_bytes = static_cast<int64_t>(max_memory_gb * 1024 * 1024 * 1024);
-    cout << "max bytes " << max_bytes << " " << max_memory_gb << endl;
-    int size_of_chunk = max_bytes / (bytes_per_vector * bytes_per_vector);
-
-    cout << "Using chunks of size " << size_of_chunk << endl;
-
-    // Get total number of vectors
-    ifstream file(matrix_file, ios::ate | ios::binary);
-    int64_t file_size = file.tellg();
-    file.close();
-    int total_vectors = file_size / bytes_per_vector;
-
-    cout << "Total vectors: " << total_vectors << endl;
-
-    auto start_time = chrono::high_resolution_clock::now();
-    
-    // int outer_threads = min(num_threads, min(8, num_shards));
-    // int inner_threads = max(1, num_threads / outer_threads);
-    // omp_set_nested(1);
-    // omp_set_max_active_levels(2);
-
-    // omp_set_num_threads(outer_threads);
-    // #pragma omp parallel for schedule(dynamic)
-    omp_set_num_threads(num_threads);
-    // for(int i=start_shard; i<end_shard; i++){
-        // omp_set_num_threads(inner_threads);
-
-        // shard_idx = i;
-    string shard_folder = output_folder + "shard_" + to_string(shard_idx) + "/";
-    if (!fs::exists(shard_folder)) {
-        fs::create_directories(shard_folder);
-    }
-
-    // Compute row range for this shard
-    int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
-    int begin_row = shard_idx * rows_per_shard;
-    int end_row = min(begin_row + rows_per_shard, total_vectors);
-
-    // begin_row = 9599;
-    // end_row = begin_row + 2;
-
-    cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row << endl;
-
-    vector<tuple<int, int, int64_t>> all_results;
-
-    for (int begin_i = begin_row; begin_i < end_row; begin_i += size_of_chunk) {
-        int end_i = min(begin_i + size_of_chunk, end_row);
-
-        // auto t_blocki_start = chrono::high_resolution_clock::now();
-        MatrixXi block_i = load_matrix_block(matrix_file, dimension, begin_i, end_i);
-        VectorXd norms_i = Map<VectorXd>(all_norms.data() + begin_i, end_i - begin_i);
-
-        // auto t_blocki_end = chrono::high_resolution_clock::now();
-
-        for (int begin_j = 0; begin_j < total_vectors; begin_j += size_of_chunk) {
-            int end_j = min(begin_j + size_of_chunk, total_vectors);
-
-            // auto t_blockj_start = chrono::high_resolution_clock::now();
-            MatrixXi block_j = load_matrix_block(matrix_file, dimension, begin_j, end_j);
-            VectorXd norms_j = Map<VectorXd>(all_norms.data() + begin_j, end_j - begin_j);
-            // auto t_blockj_end = chrono::high_resolution_clock::now();
-
-            // cout << "Processing block (" << begin_i << ":" << end_i << ") x ("
-            //     << begin_j << ":" << end_j << ")" << endl;
-
-            // auto t_dot_start = chrono::high_resolution_clock::now();
-            SparseResult result;
-            if (strategy == 0){ //random projections
-                result = compute_sparse_dot_products_optimized(block_i, block_j, norms_i, norms_j, dimension);
-            }
-            else{ //minHashes
-                result = compute_jaccard_with_MinHash(block_i, block_j, dimension);
-            }
-
-            // auto t_store_start = chrono::high_resolution_clock::now();
-            // Add global offsets and store
-            for (size_t k = 0; k < result.values.size(); ++k) {
-                all_results.emplace_back(
-                    begin_i + result.rows[k],
-                    begin_j + result.cols[k],
-                    result.values[k]
-                );
-            }
+    string dtype = "int32";
+    string dtype_file = db_folder + "dtype.txt";
+    if (fs::exists(norms_file)) {
+        ifstream dtype_in(dtype_file);
+        if (dtype_in) {
+            getline(dtype_in, dtype);
+            dtype_in.close();
         }
     }
 
-    // Write results to the shard subfolder
-    // write_sparse_results_prev(shard_folder, all_results, dimension);
-    // write_sparse_results(shard_folder, all_results, dimension);
-    // write_sparse_results_rice(shard_folder, all_results, dimension);
-    // write_sparse_results_vbyte(shard_folder, all_results, dimension);
-    // write_sparse_results_jaccard(shard_folder, all_results, all_norms ,dimension);
-    write_sparse_results_jaccard_wo_sort(shard_folder, all_results, all_norms ,dimension);
-    // }
+    if (dtype == "int16"){
+        return pairwise_comp_optimized_16bits(argc, argv);
+    }
+    else if (dtype != "int16"){
 
-    auto end_time = chrono::high_resolution_clock::now();
-    auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+        // Ensure output folder ends with '/'
+        if (!output_folder.empty() && output_folder.back() != '/' && output_folder.back() != '\\') {
+            output_folder += '/';
+        }
 
-    cout << "Total computation time: " << duration.count() << " ms" << endl;
+        if (!db_folder.empty() && db_folder.back() != '/' && db_folder.back() != '\\') {
+            output_folder += '/';
+        }
+
+        matrix_file = db_folder + "vectors.bin";
+
+        string norms_file = db_folder + "vector_norms.txt";
+        if (!fs::exists(norms_file)) {
+            cerr << "Error: Required file 'vector_norms.txt' not found in output folder: " << db_folder << endl;
+            return 1;
+        }
+
+        vector<double> all_norms;
+        string line;
+        ifstream norms_in(norms_file);
+        while (getline(norms_in, line)) {
+            size_t pos = line.find(' ');
+            if (pos == string::npos) continue;
+            double norm = stod(line.substr(pos + 1));
+            all_norms.push_back(norm*norm);
+        }
+        // Calculate chunk size
+        int bytes_per_vector = dimension * sizeof(int32_t);
+        int64_t max_bytes = static_cast<int64_t>(max_memory_gb * 1024 * 1024 * 1024);
+        cout << "max bytes " << max_bytes << " " << max_memory_gb << endl;
+        int size_of_chunk = max_bytes / (bytes_per_vector * bytes_per_vector);
+
+        cout << "Using chunks of size " << size_of_chunk << endl;
+
+        // Get total number of vectors
+        ifstream file(matrix_file, ios::ate | ios::binary);
+        int64_t file_size = file.tellg();
+        file.close();
+        int total_vectors = file_size / bytes_per_vector;
+
+        cout << "Total vectors: " << total_vectors << endl;
+
+        auto start_time = chrono::high_resolution_clock::now();
+        
+        // int outer_threads = min(num_threads, min(8, num_shards));
+        // int inner_threads = max(1, num_threads / outer_threads);
+        // omp_set_nested(1);
+        // omp_set_max_active_levels(2);
+
+        // omp_set_num_threads(outer_threads);
+        // #pragma omp parallel for schedule(dynamic)
+        omp_set_num_threads(num_threads);
+        // for(int i=start_shard; i<end_shard; i++){
+            // omp_set_num_threads(inner_threads);
+
+            // shard_idx = i;
+        string shard_folder = output_folder + "shard_" + to_string(shard_idx) + "/";
+        if (!fs::exists(shard_folder)) {
+            fs::create_directories(shard_folder);
+        }
+
+        // Compute row range for this shard
+        int rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+        int begin_row = shard_idx * rows_per_shard;
+        int end_row = min(begin_row + rows_per_shard, total_vectors);
+
+        // begin_row = 9599;
+        // end_row = begin_row + 2;
+
+        cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row << endl;
+
+        vector<tuple<int, int, int64_t>> all_results;
+
+        for (int begin_i = begin_row; begin_i < end_row; begin_i += size_of_chunk) {
+            int end_i = min(begin_i + size_of_chunk, end_row);
+
+            // auto t_blocki_start = chrono::high_resolution_clock::now();
+            MatrixXi block_i = load_matrix_block(matrix_file, dimension, begin_i, end_i);
+            VectorXd norms_i = Map<VectorXd>(all_norms.data() + begin_i, end_i - begin_i);
+
+            // auto t_blocki_end = chrono::high_resolution_clock::now();
+
+            for (int begin_j = 0; begin_j < total_vectors; begin_j += size_of_chunk) {
+                int end_j = min(begin_j + size_of_chunk, total_vectors);
+
+                // auto t_blockj_start = chrono::high_resolution_clock::now();
+                MatrixXi block_j = load_matrix_block(matrix_file, dimension, begin_j, end_j);
+                VectorXd norms_j = Map<VectorXd>(all_norms.data() + begin_j, end_j - begin_j);
+                // auto t_blockj_end = chrono::high_resolution_clock::now();
+
+                // cout << "Processing block (" << begin_i << ":" << end_i << ") x ("
+                //     << begin_j << ":" << end_j << ")" << endl;
+
+                // auto t_dot_start = chrono::high_resolution_clock::now();
+                SparseResult result;
+                if (strategy == 0){ //random projections
+                    result = compute_sparse_dot_products_optimized(block_i, block_j, norms_i, norms_j, dimension);
+                }
+                else{ //minHashes
+                    result = compute_jaccard_with_MinHash(block_i, block_j, dimension);
+                }
+
+                // auto t_store_start = chrono::high_resolution_clock::now();
+                // Add global offsets and store
+                for (size_t k = 0; k < result.values.size(); ++k) {
+                    all_results.emplace_back(
+                        begin_i + result.rows[k],
+                        begin_j + result.cols[k],
+                        result.values[k]
+                    );
+                }
+            }
+        }
+
+        // Write results to the shard subfolder
+        // write_sparse_results_prev(shard_folder, all_results, dimension);
+        // write_sparse_results(shard_folder, all_results, dimension);
+        // write_sparse_results_rice(shard_folder, all_results, dimension);
+        // write_sparse_results_vbyte(shard_folder, all_results, dimension);
+        // write_sparse_results_jaccard(shard_folder, all_results, all_norms ,dimension);
+        write_sparse_results_jaccard_wo_sort(shard_folder, all_results, all_norms ,dimension);
+        // }
+
+        auto end_time = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+
+        cout << "Total computation time: " << duration.count() << " ms" << endl;
+    }
     
     return 0;
 }
