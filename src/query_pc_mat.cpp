@@ -37,7 +37,8 @@ std::pair<double, std::string> get_time_unit(double total_time){
 
 void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, std::string query_file,
         std::vector<std::string>& query_ids_str, bool write_to_file, 
-        bool show_all_neighbors, int64_t top_n, uint32_t batch_size, std::string out_fn, std::string sep, bool print_to_screen){
+        bool show_all_neighbors, int64_t top_n, uint32_t batch_size, std::string out_fn, std::string sep, bool print_to_screen,
+        double min_jaccard, double max_jaccard){
     
     std::vector<string> identifiers;
     unordered_map<string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
@@ -72,6 +73,30 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
         show_error_and_exit("Error: Could not determine total number of vectors" );
     }
     
+    // Validate threshold parameters
+    bool use_min_threshold = (min_jaccard >= 0.0);
+    bool use_max_threshold = (max_jaccard >= 0.0);
+    
+    if (use_min_threshold && use_max_threshold && min_jaccard > max_jaccard) {
+        show_error_and_exit("Error: --min_jaccard cannot be greater than --max_jaccard");
+    }
+    
+    if (use_min_threshold && (min_jaccard < 0.0 || min_jaccard > 1.0)) {
+        show_error_and_exit("Error: --min_jaccard must be between 0.0 and 1.0");
+    }
+    
+    if (use_max_threshold && (max_jaccard < 0.0 || max_jaccard > 1.0)) {
+        show_error_and_exit("Error: --max_jaccard must be between 0.0 and 1.0");
+    }
+    
+    if (use_min_threshold || use_max_threshold) {
+        std::cout << "Filtering neighbors with Jaccard similarity";
+        if (use_min_threshold) std::cout << " >= " << min_jaccard;
+        if (use_min_threshold && use_max_threshold) std::cout << " and";
+        if (use_max_threshold) std::cout << " <= " << max_jaccard;
+        std::cout << std::endl << std::endl;
+    }
+    
     // std::ofstream log_out(matrix_folder + "/neighbors_all.txt");
     std::chrono::duration<double> elapsed = std::chrono::duration<double>::zero();
 
@@ -88,9 +113,31 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
         for(int i=0; i< all_results.size(); i++){
         
             const pc_mat::Result& res = all_results[i];
+            
+            // Apply threshold filtering
+            std::vector<std::string> filtered_neighbor_ids;
+            std::vector<float> filtered_jaccard_similarities;
+            
+            for (size_t j = 0; j < res.neighbor_ids.size(); ++j) {
+                float jaccard = res.jaccard_similarities[j];
+                bool passes_filter = true;
+                
+                if (use_min_threshold && jaccard < min_jaccard) {
+                    passes_filter = false;
+                }
+                if (use_max_threshold && jaccard > max_jaccard) {
+                    passes_filter = false;
+                }
+                
+                if (passes_filter) {
+                    filtered_neighbor_ids.push_back(res.neighbor_ids[j]);
+                    filtered_jaccard_similarities.push_back(jaccard);
+                }
+            }
+            
             // if(print_to_screen) std::cout<<start_indx + i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
             // log_out<<start_indx + i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
-            if(print_to_screen) std::cout << "Query: " << res.self_id << " #Neighbors: "<<res.neighbor_ids.size()<< std::endl;
+            if(print_to_screen) std::cout << "Query: " << res.self_id << " #Neighbors: "<<filtered_neighbor_ids.size()<< std::endl;
             
             std::ofstream out;
             if(write_to_file) {
@@ -101,14 +148,14 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
             }
 
             int64_t num_neighbors_to_show = show_all_neighbors ? 
-                        res.neighbor_ids.size()
-                        :std::min<int64_t>(top_n, res.neighbor_ids.size());
+                        filtered_neighbor_ids.size()
+                        :std::min<int64_t>(top_n, filtered_neighbor_ids.size());
             if(print_to_screen) std::cout << "Top " << num_neighbors_to_show << " neighbors:\n";
 
             for (size_t j = 0; j < num_neighbors_to_show; ++j) {
-                if(print_to_screen) std::cout <<j+1<< ". Neighbor: " << res.neighbor_ids[j]
-                     << " Jaccard Similarity: " << res.jaccard_similarities[j] << endl;
-                if(write_to_file) out<<res.neighbor_ids[j]<<sep<<res.jaccard_similarities[j]<<std::endl;
+                if(print_to_screen) std::cout <<j+1<< ". Neighbor: " << filtered_neighbor_ids[j]
+                     << " Jaccard Similarity: " << filtered_jaccard_similarities[j] << endl;
+                if(write_to_file) out<<filtered_neighbor_ids[j]<<sep<<filtered_jaccard_similarities[j]<<std::endl;
             }
             if(print_to_screen) std::cout << std::endl;
             out.close();
@@ -241,6 +288,8 @@ int main(int argc, char* argv[]) {
     std::string out_fn = "out.txt";
     bool print_to_screen = false;
     bool show_all_neighbors = false;
+    double min_jaccard = -1.0;  // negative value means not set
+    double max_jaccard = -1.0;  // negative value means not set
     
     bool use_query_file = false;
     bool use_query_ids = false;
@@ -259,6 +308,8 @@ int main(int argc, char* argv[]) {
             // | clipp::option("--stdin").set(read_from_stdin)
         ),
         clipp::option("--top") & clipp::value("int", top_n),
+        clipp::option("--min_jaccard") & clipp::value("float", min_jaccard),
+        clipp::option("--max_jaccard") & clipp::value("float", max_jaccard),
         clipp::option("--batch_size") & clipp::value("int", batch_size),
         clipp::option("--write_to_file").set(write_to_file) & clipp::value("file", out_fn),
         clipp::option("--show_all").set(show_all_neighbors),
@@ -278,11 +329,20 @@ int main(int argc, char* argv[]) {
         cout << "  --col_file\t File containing query col IDs (one per line)\n";
         // cout << "  --stdin          Read query IDs from standard input\n";
         cout << "  --top\t Number of top jaccard values to show [default 10]\n";
+        cout << "  --min_jaccard\t Minimum Jaccard similarity threshold (0.0-1.0) [optional]\n";
+        cout << "  --max_jaccard\t Maximum Jaccard similarity threshold (0.0-1.0) [optional]\n";
         cout << "  --batch_size\t Number of queries to process per batch [default 1000]\n";
         cout << "  --write_to_file\t Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz for row-col query. *.csv/*tsv/*txt for regular query).\n";
         cout << "  --show_all\t Whether to show all neighbors instead of top N\n";
         cout << "  --print\t Whether to print the outputs to screen\n";
         cout << "  --help\t Show this help message\n\n";
+        cout << "Threshold Filtering:\n";
+        cout << "  --min_jaccard and --max_jaccard can be used to filter neighbors by Jaccard similarity.\n";
+        cout << "  Examples:\n";
+        cout << "    --min_jaccard 0.5              Return neighbors with Jaccard >= 0.5\n";
+        cout << "    --max_jaccard 0.9              Return neighbors with Jaccard <= 0.9\n";
+        cout << "    --min_jaccard 0.3 --max_jaccard 0.8  Return neighbors with 0.3 <= Jaccard <= 0.8\n";
+        cout << "    --top 20 --min_jaccard 0.5     Return top 20 neighbors with Jaccard >= 0.5\n\n";
         // cout << "Examples:\n";
         // cout << "  " << argv[0] << " --matrix_folder ./results --query_ids SRR123456 SRR789012\n";
         // cout << "  " << argv[0] << " --matrix_folder ./results --query_file queries.txt\n";
@@ -325,7 +385,8 @@ int main(int argc, char* argv[]) {
         
         std::string sep = file_extension == "csv" ? "," : "\t";
         query_nearest_neighbors(matrix_folder, db_folder, query_file, query_ids_str, 
-            write_to_file, show_all_neighbors, top_n, batch_size, out_fn, sep, print_to_screen);
+            write_to_file, show_all_neighbors, top_n, batch_size, out_fn, sep, print_to_screen,
+            min_jaccard, max_jaccard);
     }
     else if(use_row_col_files){
         if(row_file.empty() || col_file.empty()){
