@@ -38,7 +38,7 @@ std::pair<double, std::string> get_time_unit(double total_time){
 void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, std::string query_file,
         std::vector<std::string>& query_ids_str, bool write_to_file, 
         bool show_all_neighbors, int64_t top_n, uint32_t batch_size, std::string out_fn, std::string sep, bool print_to_screen,
-        double min_jaccard, double max_jaccard){
+        double min_jaccard, double max_jaccard, bool no_self){
     
     std::vector<string> identifiers;
     unordered_map<string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
@@ -94,7 +94,15 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
         if (use_min_threshold) std::cout << " >= " << min_jaccard;
         if (use_min_threshold && use_max_threshold) std::cout << " and";
         if (use_max_threshold) std::cout << " <= " << max_jaccard;
-        std::cout << std::endl << std::endl;
+        std::cout << std::endl;
+    }
+    
+    if (no_self) {
+        std::cout << "Excluding self-matches from results" << std::endl;
+    }
+    
+    if (use_min_threshold || use_max_threshold || no_self) {
+        std::cout << std::endl;
     }
     
     // std::ofstream log_out(matrix_folder + "/neighbors_all.txt");
@@ -114,14 +122,16 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
         
             const pc_mat::Result& res = all_results[i];
             
-            // Apply threshold filtering
+            // Apply threshold filtering and self-match exclusion
             std::vector<std::string> filtered_neighbor_ids;
             std::vector<float> filtered_jaccard_similarities;
             
             for (size_t j = 0; j < res.neighbor_ids.size(); ++j) {
                 float jaccard = res.jaccard_similarities[j];
+                std::string neighbor_id = res.neighbor_ids[j];
                 bool passes_filter = true;
                 
+                // Apply Jaccard threshold filters
                 if (use_min_threshold && jaccard < min_jaccard) {
                     passes_filter = false;
                 }
@@ -129,8 +139,13 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
                     passes_filter = false;
                 }
                 
+                // Apply self-match filter
+                if (no_self && neighbor_id == res.self_id) {
+                    passes_filter = false;
+                }
+                
                 if (passes_filter) {
-                    filtered_neighbor_ids.push_back(res.neighbor_ids[j]);
+                    filtered_neighbor_ids.push_back(neighbor_id);
                     filtered_jaccard_similarities.push_back(jaccard);
                 }
             }
@@ -138,6 +153,12 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
             // if(print_to_screen) std::cout<<start_indx + i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
             // log_out<<start_indx + i<<" "<<res.self_id<<" "<<res.neighbor_ids.size()<<"\n";
             if(print_to_screen) std::cout << "Query: " << res.self_id << " #Neighbors: "<<filtered_neighbor_ids.size()<< std::endl;
+            
+            // Skip file creation if no neighbors remain after filtering
+            if(write_to_file && filtered_neighbor_ids.empty()) {
+                if(print_to_screen) std::cout << "Skipping file creation (no neighbors after filtering)" << std::endl << std::endl;
+                continue;
+            }
             
             std::ofstream out;
             if(write_to_file) {
@@ -158,7 +179,7 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
                 if(write_to_file) out<<filtered_neighbor_ids[j]<<sep<<filtered_jaccard_similarities[j]<<std::endl;
             }
             if(print_to_screen) std::cout << std::endl;
-            out.close();
+            if(write_to_file) out.close();
         }
         auto time_unit = get_time_unit(elapsed.count());
         std::cout<<"--------- Completed\t"<<end_indx<<"\tqueries in\t"<<std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<<" ---------\n";
@@ -290,6 +311,7 @@ int main(int argc, char* argv[]) {
     bool show_all_neighbors = false;
     double min_jaccard = -1.0;  // negative value means not set
     double max_jaccard = -1.0;  // negative value means not set
+    bool no_self = false;
     
     bool use_query_file = false;
     bool use_query_ids = false;
@@ -310,6 +332,7 @@ int main(int argc, char* argv[]) {
         clipp::option("--top") & clipp::value("int", top_n),
         clipp::option("--min_jaccard") & clipp::value("float", min_jaccard),
         clipp::option("--max_jaccard") & clipp::value("float", max_jaccard),
+        clipp::option("--no_self").set(no_self),
         clipp::option("--batch_size") & clipp::value("int", batch_size),
         clipp::option("--write_to_file").set(write_to_file) & clipp::value("file", out_fn),
         clipp::option("--show_all").set(show_all_neighbors),
@@ -331,6 +354,7 @@ int main(int argc, char* argv[]) {
         cout << "  --top\t Number of top jaccard values to show [default 10]\n";
         cout << "  --min_jaccard\t Minimum Jaccard similarity threshold (0.0-1.0) [optional]\n";
         cout << "  --max_jaccard\t Maximum Jaccard similarity threshold (0.0-1.0) [optional]\n";
+        cout << "  --no_self\t Exclude self-matches from results [optional]\n";
         cout << "  --batch_size\t Number of queries to process per batch [default 1000]\n";
         cout << "  --write_to_file\t Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz for row-col query. *.csv/*tsv/*txt for regular query).\n";
         cout << "  --show_all\t Whether to show all neighbors instead of top N\n";
@@ -343,6 +367,12 @@ int main(int argc, char* argv[]) {
         cout << "    --max_jaccard 0.9              Return neighbors with Jaccard <= 0.9\n";
         cout << "    --min_jaccard 0.3 --max_jaccard 0.8  Return neighbors with 0.3 <= Jaccard <= 0.8\n";
         cout << "    --top 20 --min_jaccard 0.5     Return top 20 neighbors with Jaccard >= 0.5\n\n";
+        cout << "Self-Match Exclusion:\n";
+        cout << "  --no_self excludes a sample from its own neighbor list.\n";
+        cout << "  When combined with --write_to_file, files with only self-matches are not created.\n";
+        cout << "  Examples:\n";
+        cout << "    --no_self --show_all           Show all neighbors except self\n";
+        cout << "    --no_self --min_jaccard 0.5    Show neighbors with Jaccard >= 0.5, excluding self\n\n";
         // cout << "Examples:\n";
         // cout << "  " << argv[0] << " --matrix_folder ./results --query_ids SRR123456 SRR789012\n";
         // cout << "  " << argv[0] << " --matrix_folder ./results --query_file queries.txt\n";
@@ -386,7 +416,7 @@ int main(int argc, char* argv[]) {
         std::string sep = file_extension == "csv" ? "," : "\t";
         query_nearest_neighbors(matrix_folder, db_folder, query_file, query_ids_str, 
             write_to_file, show_all_neighbors, top_n, batch_size, out_fn, sep, print_to_screen,
-            min_jaccard, max_jaccard);
+            min_jaccard, max_jaccard, no_self);
     }
     else if(use_row_col_files){
         if(row_file.empty() || col_file.empty()){
