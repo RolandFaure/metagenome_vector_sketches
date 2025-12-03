@@ -56,6 +56,9 @@ target_include_directories(cnpy PUBLIC
 )
 target_link_libraries(cnpy PUBLIC ${ZLIB_LIBRARY})
 
+# ===== HDF5 ======
+add_subdirectory(external/HighFive)
+
 # ==== Executables ====
 add_executable(project_everything
     src/project_everything.cpp
@@ -81,23 +84,8 @@ target_link_directories(pairwise_comp_optimized PRIVATE
 )
 target_link_libraries(pairwise_comp_optimized PRIVATE 
     BITS
-    streamvbyte
+    # streamvbyte
 )
-
-# add_executable(pairwise_comp_optimized_vbyte
-#     src/pairwise_comp_optimized.cpp
-# )
-# target_include_directories(pairwise_comp_optimized_vbyte PRIVATE 
-#     ${EIGEN_INCLUDE_DIR}
-#     /scratch/mqa6002/software/local/include/
-# )
-# target_link_directories(pairwise_comp_optimized_vbyte PRIVATE 
-#     /scratch/mqa6002/software/local/lib/
-# )
-# target_link_libraries(pairwise_comp_optimized_vbyte PRIVATE 
-#     BITS
-#     streamvbyte
-# )
 
 add_executable(query_ava_matrix
     src/query_ava_matrix.cpp
@@ -137,7 +125,7 @@ add_executable(query_pc_mat
 target_link_directories(query_pc_mat PRIVATE
     /scratch/mqa6002/software/local/lib/
 )
-target_link_libraries(query_pc_mat PRIVATE pc_mat_cmp_lib cnpy)
+target_link_libraries(query_pc_mat PRIVATE pc_mat_cmp_lib cnpy HighFive)
 
 
 # ==== Optional Clean target ====

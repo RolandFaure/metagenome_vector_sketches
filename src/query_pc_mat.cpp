@@ -1,6 +1,9 @@
 #include "read_pc_mat.h"
 #include "clipp.h"
 #include "cnpy.h"
+#include <highfive/H5File.hpp>
+#include <memory>
+#include <omp.h> 
 #include <cassert>
 #include <cmath>
 
@@ -124,8 +127,11 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
     std::cout << "Query completed in "<<std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<< "\n" << std::endl;
 }
 
+/*
 void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::string row_file, std::string col_file,
-        bool write_to_file, std::string out_fn, uint32_t batch_size, bool print_to_screen, std::string sep){
+        bool write_to_file, std::string out_fn, uint32_t batch_size, bool print_to_screen, std::string sep,
+        std::string file_extension
+    ){
     std::vector<string> identifiers;
     unordered_map<string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
     
@@ -151,14 +157,28 @@ void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::
     uint64_t start_indx = 0, end_indx;
 
     std::ofstream out;
-    if(write_to_file && sep != "-1") {
-        std::cout<<"Writing in file: "<<out_fn<<std::endl<<std::endl;
-        out.open(out_fn.c_str());
-        out<<"Accession"+sep;
-        for(size_t i=0; i<col_vec.size(); i++){
-            out<<col_vec[i]<<sep;
-        } 
-        out<<"\n";
+    std::unique_ptr<HighFive::File> hf_ptr;
+    HighFive::DataSetCreateProps props;
+    if(write_to_file) {
+        if(file_extension == "csv" || file_extension == "tsv"){
+            std::cout<<"Writing in file: "<<out_fn<<std::endl<<std::endl;
+            out.open(out_fn.c_str());
+            out<<"Accession"+sep;
+            for(size_t i=0; i<col_vec.size(); i++){
+                out<<col_vec[i]<<sep;
+            } 
+            out<<"\n";
+        }
+        else if(file_extension == "h5"){
+            // std::string filename = "multi_data.h5";
+            hf_ptr = std::make_unique<HighFive::File>(out_fn, 
+                HighFive::File::Overwrite);
+            hsize_t safe_chunk_size = std::min(static_cast<hsize_t>(col_vec.size()), 
+                    static_cast<hsize_t>(16384));
+            props.add(HighFive::Chunking(std::vector<hsize_t>{safe_chunk_size}));
+            props.add(HighFive::Shuffle());
+            props.add(HighFive::Deflate(9));
+        }
     }
 
     if(print_to_screen) std::cout<<"Accession\t";
@@ -167,7 +187,7 @@ void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::
         if(print_to_screen) std::cout<<col_vec[i]<<"\t";
     } 
     if(print_to_screen) std::cout<<"\n";
-
+    
     
     while(1){
         end_indx = std::min(start_indx + batch_size, row_query_vec.size());
@@ -182,24 +202,30 @@ void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::
             std::vector<float> & res = all_results[i];
             
             if(print_to_screen) std::cout<<row_vec[start_indx + i]<<"\t";
-            if(write_to_file && sep != "-1") out<<row_vec[start_indx + i]<<sep;
+            if(write_to_file && (file_extension == "csv" || file_extension == "tsv")) 
+                    out<<row_vec[start_indx + i]<<sep;
             
-            if(print_to_screen || (write_to_file && sep != "-1")){
+            if(print_to_screen || (write_to_file && (file_extension == "csv" || file_extension == "tsv"))){
                 for (size_t j = 0; j < res.size(); ++j) {
                     if(print_to_screen) std::cout<<res[j]<<"\t";
-                    if(write_to_file && sep != "-1") out<<res[j]<<sep;
+                    if(write_to_file && (file_extension == "csv" || file_extension == "tsv")) 
+                            out<<res[j]<<sep;
                 }
             }
             
-            if(write_to_file && sep == "-1"){
-                if(start_indx == 0 && i == 0)
-                    cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "w");
-                else
-                    cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "a");
+            if(write_to_file){
+                if(file_extension == "npy" || file_extension == "npz"){
+                    if(start_indx == 0 && i == 0)
+                        cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "w");
+                    else
+                        cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "a");
+                }
+                else if(file_extension == "h5"){
+                    hf_ptr->createDataSet(row_vec[start_indx + i], res, props);
+                }   
             }
-            
             if(print_to_screen) std::cout << std::endl;
-            if(write_to_file && sep != "-1") out<<"\n";
+            if(write_to_file && (file_extension == "csv" || file_extension == "tsv")) out<<"\n";
         }
         
         auto time_unit = get_time_unit(elapsed.count());
@@ -213,7 +239,139 @@ void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::
 
     std::cout << "Query completed in " << std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<<"\n" << std::endl;
 
-    if(write_to_file && sep != "-1") out.close();
+    if(write_to_file && (file_extension == "csv" || file_extension == "tsv")) out.close();
+}
+*/
+
+void query_sliced_matrix(
+    std::string matrix_folder, std::string db_folder, std::string row_file, std::string col_file,
+    bool write_to_file, std::string out_fn, uint32_t batch_size, bool print_to_screen, std::string sep,
+    std::string file_extension, int num_threads
+) {
+    std::vector<std::string> identifiers;
+    std::unordered_map<std::string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
+
+    std::vector<int32_t> row_query_vec, col_query_vec;
+    std::vector<std::string> row_vec, col_vec;
+
+    row_query_vec = pc_mat::read_queries_from_file(row_file, id_to_index, row_vec);
+    col_query_vec = pc_mat::read_queries_from_file(col_file, id_to_index, col_vec);
+
+    if (row_query_vec.empty() || col_query_vec.empty()) {
+        show_error_and_exit("Empty row or col accessions.");
+    }
+
+    std::vector<float> vector_norms;
+    pc_mat::load_vector_norms(db_folder, vector_norms);
+
+    int total_vectors = identifiers.size();
+    std::cout << "Total vectors loaded: " << total_vectors << std::endl << std::endl;
+    if (total_vectors <= 0) {
+        show_error_and_exit("Error: Could not determine total number of vectors");
+    }
+
+    std::ofstream out;
+    std::unique_ptr<HighFive::File> hf_ptr;
+    HighFive::DataSetCreateProps props;
+
+    if (write_to_file) {
+        if (file_extension == "csv" || file_extension == "tsv") {
+            std::cout << "Writing in file: " << out_fn << std::endl << std::endl;
+            out.open(out_fn.c_str());
+            // Write Header
+            out << "Accession" << sep;
+            for (size_t i = 0; i < col_vec.size(); i++) {
+                out << col_vec[i] << sep;
+            }
+            out << "\n";
+        } else if (file_extension == "h5") {
+            hf_ptr = std::make_unique<HighFive::File>(out_fn, HighFive::File::Overwrite);
+            hsize_t safe_chunk_size = std::min(static_cast<hsize_t>(col_vec.size()),
+                                               static_cast<hsize_t>(16384));
+            props.add(HighFive::Chunking(std::vector<hsize_t>{safe_chunk_size}));
+            props.add(HighFive::Shuffle());
+            props.add(HighFive::Deflate(9));
+        } else if (file_extension == "npy" || file_extension == "npz") {
+            // Initialize NPY file to ensure it exists for appending later
+            std::ofstream clear_file(out_fn, std::ios::out | std::ios::trunc);
+            clear_file.close();
+        }
+    }
+
+    if (print_to_screen) {
+        std::cout << "Accession\t";
+        for (size_t i = 0; i < col_vec.size(); i++) {
+            std::cout << col_vec[i] << "\t";
+        }
+        std::cout << "\n";
+    }
+
+    // --- 3. OpenMP Parallel Processing ---
+    auto start_total = std::chrono::high_resolution_clock::now();
+    
+    size_t total_rows = row_query_vec.size();
+    size_t num_batches = (total_rows + batch_size - 1) / batch_size;
+
+    #pragma omp parallel for schedule(dynamic, 1) num_threads(num_threads)
+    for (size_t b = 0; b < num_batches; ++b) {
+        size_t start_indx = b * batch_size;
+        size_t end_indx = std::min(start_indx + batch_size, total_rows);
+
+        std::vector<int32_t> row_sub_queries(
+            row_query_vec.begin() + start_indx, 
+            row_query_vec.begin() + end_indx
+        );
+
+        std::vector<std::vector<float>> all_results = pc_mat::query_sliced(
+            matrix_folder, row_sub_queries, col_query_vec, total_vectors, vector_norms
+        );
+
+        #pragma omp critical
+        {
+            for (int i = 0; i < all_results.size(); i++) {
+                std::vector<float>& res = all_results[i];
+                size_t actual_row_idx = start_indx + i;
+
+                if (print_to_screen) {
+                    std::cout << row_vec[actual_row_idx] << "\t";
+                    for (size_t j = 0; j < res.size(); ++j) {
+                        std::cout << res[j] << "\t";
+                    }
+                    std::cout << std::endl;
+                }
+
+                if (write_to_file) {
+                    if (file_extension == "csv" || file_extension == "tsv") {
+                        out << row_vec[actual_row_idx] << sep;
+                        for (size_t j = 0; j < res.size(); ++j) {
+                            out << res[j] << sep;
+                        }
+                        out << "\n";
+                    } 
+                    else if (file_extension == "h5") {
+                        hf_ptr->createDataSet(row_vec[actual_row_idx], res, props);
+                    } 
+                    else if (file_extension == "npy" || file_extension == "npz") {
+                        cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "a");
+                    }
+                }
+            }
+            
+            // order not guaranteed
+            std::cout << "Batch ending at " << end_indx << " processed." << std::endl;
+        }
+    }
+
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll Queries completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+
+    if (write_to_file && (file_extension == "csv" || file_extension == "tsv")) {
+        out.close();
+    }
 }
 
 std::string get_file_extension(std::string filename){
@@ -279,7 +437,7 @@ int main(int argc, char* argv[]) {
         // cout << "  --stdin          Read query IDs from standard input\n";
         cout << "  --top\t Number of top jaccard values to show [default 10]\n";
         cout << "  --batch_size\t Number of queries to process per batch [default 1000]\n";
-        cout << "  --write_to_file\t Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz for row-col query. *.csv/*tsv/*txt for regular query).\n";
+        cout << "  --write_to_file\t Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz/*h5 for row-col query. *.csv/*tsv/*txt for regular query).\n";
         cout << "  --show_all\t Whether to show all neighbors instead of top N\n";
         cout << "  --print\t Whether to print the outputs to screen\n";
         cout << "  --help\t Show this help message\n\n";
@@ -333,8 +491,8 @@ int main(int argc, char* argv[]) {
         }
         std::string file_extension = get_file_extension(out_fn);
         if(write_to_file){
-            if(file_extension != "csv" && file_extension != "tsv" && file_extension != "npy" && file_extension != "npz"){
-                show_error_and_exit("Output file extension is: "+file_extension+". Expected: csv, tsv, npy or npz.");
+            if(file_extension != "csv" && file_extension != "tsv" && file_extension != "npy" && file_extension != "npz" && file_extension != "h5"){
+                show_error_and_exit("Output file extension is: "+file_extension+". Expected: csv, tsv, npy, npz or h5.");
             }
         }
         std::string sep = "-1";
@@ -342,7 +500,7 @@ int main(int argc, char* argv[]) {
             sep = file_extension == "csv" ? "," : "\t";
         }
 
-        query_sliced_matrix(matrix_folder, db_folder, row_file, col_file, write_to_file, out_fn, batch_size, print_to_screen, sep);
+        query_sliced_matrix(matrix_folder, db_folder, row_file, col_file, write_to_file, out_fn, batch_size, print_to_screen, sep, file_extension, 4);
     }
     else{
         std::cerr<<"No query types specified. Aborting...\n";

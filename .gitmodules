@@ -1,3 +1,6 @@
 [submodule "bits"]
 	path = bits
 	url = https://github.com/hasin-abrar/bits.git
+[submodule "external/HighFive"]
+	path = external/HighFive
+	url = https://github.com/BlueBrain/HighFive.git

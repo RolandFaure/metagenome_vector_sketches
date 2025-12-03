@@ -24,7 +24,7 @@ Create a new Conda environment named faiss_env and install the required dependen
 conda create -n faiss_env python=3.12
 conda activate faiss_env
 conda install -c pytorch faiss-cpu
-conda install -c conda-forge pybind11 scipy matplotlib pandas
+conda install -c conda-forge pybind11 scipy matplotlib pandas hdf5 h5py
 ```
 ### Build the Executables
 
@@ -34,7 +34,8 @@ Navigate back to the main directory, create a build folder, and compile the C++ 
 cd metagenome_vector_sketches
 mkdir build
 cd build
-cmake -DPython_EXECUTABLE=$(which python) \
+cmake -DHDF5_ROOT=$CONDA_PREFIX \
+      -DPython_EXECUTABLE=$(which python) \
       -DPython_ROOT_DIR=$CONDA_PREFIX \
       -DPython_FIND_STRATEGY=LOCATION \
       ..

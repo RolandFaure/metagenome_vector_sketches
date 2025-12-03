@@ -964,6 +964,8 @@ int main(int argc, char* argv[]) {
         double norm = stod(line.substr(pos + 1));
         all_norms.push_back(norm*norm);
     }
+
+    std::cout<<"Here\n";
     // Calculate chunk size
     int bytes_per_vector = dimension * sizeof(int32_t);
     int64_t max_bytes = static_cast<int64_t>(max_memory_gb * 1024 * 1024 * 1024);
