@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <vector>
 #include <cmath>
+#include <limits>
 #include <Eigen/Dense>
 #include <omp.h>
 #include <zlib.h>
@@ -174,23 +175,12 @@ void load_signatures(std::string file_name, std::unordered_set<unsigned long int
     }
 }
 
-VectorXi transform_set_into_minHash_vector(const std::unordered_set<unsigned long int> &hashes, int d){
-    std::vector<unsigned long int> sorted_hashes(hashes.begin(), hashes.end());
-    std::sort(sorted_hashes.begin(), sorted_hashes.end());
-    VectorXi vec = VectorXi::Zero(d);
-    size_t n = std::min(static_cast<size_t>(d), sorted_hashes.size());
-    for (size_t i = 0; i < n; ++i) {
-        vec[i] = static_cast<int>(sorted_hashes[i]);
-    }
-    return vec;
-}
-
 
 int main(int argc, char* argv[]) {
     // CLI with clipp
     int t = 1;
     int d = 2048;
-    int strategy = 0;
+    bool use_int16 = false;
     std::string folder_name, index_folder;
 
     auto cli = (
@@ -198,12 +188,20 @@ int main(int argc, char* argv[]) {
         clipp::value("index_folder", index_folder),
         clipp::option("-t", "--threads") & clipp::integer("threads", t) % "Number of threads (default: 1)",
         clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)",
-        clipp::option("-s", "--strategy") & clipp::integer("strategy", strategy) % "0=random projections, 1=minHash (default: 0)"
+        clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
     );
 
     if (!clipp::parse(argc, argv, cli)) {
-        std::cerr << "Usage: " << argv[0] << " <input_folder> <index_folder> [-t threads] [-d dimension] [-s strategy]\n";
-        std::cerr << "  strategy: 0=random projections, 1=minHash\n";
+
+        
+
+        std::cerr << "Error: Failed to parse command line arguments.\n";
+        std::cerr << "Usage: " << argv[0] << " <input_folder> <index_folder> [-t threads] [-d dimension] [--int16]\n";
+        std::cerr << "  input_folder   : Path to folder containing signature files\n";
+        std::cerr << "  index_folder   : Output folder for generated index files\n";
+        std::cerr << "  -t, --threads  : Number of threads (default: 1)\n";
+        std::cerr << "  -d, --dimension: Vector dimension (default: 2048)\n";
+        std::cerr << "  --int16        : Use int16 instead of int32 for vector storage\n";
         return 1;
     }
 
@@ -245,12 +243,7 @@ int main(int argc, char* argv[]) {
     for (size_t i = 0; i < sig_files.size(); ++i) {
         std::unordered_set<unsigned long int> hashes;
         load_signatures(sig_files[i], hashes, omp_get_thread_num());
-        if (strategy == 0){
-            temp_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_vector(hashes, d)};
-        }
-        else{
-            temp_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_minHash_vector(hashes, d)};
-        }
+        temp_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_vector(hashes, d)};
         #pragma omp critical
         {
             cout << "Processed " << sig_files[i] << ", hashes size " << hashes.size() << ", file number " << i << endl;
@@ -265,9 +258,10 @@ int main(int argc, char* argv[]) {
     std::chrono::duration<double> elapsed = end - start;
     cout << "Time to compute all projected vectors: " << elapsed.count() << " seconds" << endl;
 
-    // Output norms and names to a text file, and all vectors as byte-packed int32 to a binary file
+    // Output norms and names to a text file, and all vectors as byte-packed int32/int16 to a binary file
     std::ofstream norm_out(index_folder + "vector_norms.txt");
     std::ofstream dim_out(index_folder + "dimension.txt");
+    std::ofstream dtype_out(index_folder + "dtype.txt");
     std::ofstream bin_out(index_folder + "vectors.bin", std::ios::binary);
     if (!norm_out) {
         std::cerr << "Error opening vector_norms.txt for writing." << std::endl;
@@ -275,8 +269,9 @@ int main(int argc, char* argv[]) {
     if (!bin_out) {
         std::cerr << "Error opening vectors.bin for writing." << std::endl;
     }
-    if (norm_out && bin_out && dim_out) {
+    if (norm_out && bin_out && dim_out && dtype_out) {
         dim_out << d << "\n";
+        dtype_out << (use_int16 ? "int16" : "int32") << "\n";
         int index_of_vector = 0;
         for (const auto& pair : all_projected_vectors) {
             // Extract the base name (DRR111514) from the path
@@ -287,16 +282,36 @@ int main(int argc, char* argv[]) {
             VectorXf vec_f = pair.second.cast<float>() / std::sqrt(static_cast<float>(d));
             double norm = vec_f.norm();
             norm_out << base_name << " " << norm << "\n";
-            // Write vector as int32_t, byte-packed
-            for (int i = 0; i < vec.size(); ++i) {
-                int32_t val = static_cast<int32_t>(vec[i]);
-                bin_out.write(reinterpret_cast<const char*>(&val), sizeof(int32_t));
+            
+            if (use_int16) {
+                // Write vector as int16_t, byte-packed, with overflow capping
+                constexpr int16_t int16_max = std::numeric_limits<int16_t>::max();
+                constexpr int16_t int16_min = std::numeric_limits<int16_t>::min();
+                for (int i = 0; i < vec.size(); ++i) {
+                    int32_t val32 = static_cast<int32_t>(vec[i]);
+                    int16_t val16;
+                    if (val32 > int16_max) {
+                        val16 = int16_max;
+                    } else if (val32 < int16_min) {
+                        val16 = int16_min;
+                    } else {
+                        val16 = static_cast<int16_t>(val32);
+                    }
+                    bin_out.write(reinterpret_cast<const char*>(&val16), sizeof(int16_t));
+                }
+            } else {
+                // Write vector as int32_t, byte-packed
+                for (int i = 0; i < vec.size(); ++i) {
+                    int32_t val = static_cast<int32_t>(vec[i]);
+                    bin_out.write(reinterpret_cast<const char*>(&val), sizeof(int32_t));
+                }
             }
             index_of_vector++;
         }
         norm_out.close();
         bin_out.close();
         dim_out.close();
+        dtype_out.close();
     }
 
     // std::vector<std::pair<double, double>> jaccard_pairs;
