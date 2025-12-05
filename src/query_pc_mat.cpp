@@ -35,6 +35,17 @@ std::pair<double, std::string> get_time_unit(double total_time){
     }
 }
 
+std::pair<std::string, std::string> split_path(const std::string& fullpath) {
+    size_t pos = fullpath.find_last_of("/\\");
+    if (pos == std::string::npos) {
+        return {fullpath, "./"};  // no directory
+    }
+
+    std::string filename = fullpath.substr(pos + 1);
+    std::string parent   = fullpath.substr(0, pos);
+    return {filename, parent};
+}
+
 void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, std::string query_file,
         std::vector<std::string>& query_ids_str, bool write_to_file, 
         bool show_all_neighbors, int64_t top_n, uint32_t batch_size, std::string out_fn, std::string sep, bool print_to_screen){
@@ -72,6 +83,8 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
         show_error_and_exit("Error: Could not determine total number of vectors" );
     }
     
+    auto [fname, out_file_path] = split_path(out_fn);
+    
     // std::ofstream log_out(matrix_folder + "/neighbors_all.txt");
     std::chrono::duration<double> elapsed = std::chrono::duration<double>::zero();
 
@@ -94,8 +107,8 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
             
             std::ofstream out;
             if(write_to_file) {
-                std::string nfn = res.self_id+"_"+out_fn;
-                if(print_to_screen) std::cout<<"Writing in file: "<<nfn<<std::endl<<std::endl;
+                std::string nfn = out_file_path+"/" + res.self_id+"_"+fname;
+                std::cout<<"Writing in file: "<<nfn<<std::endl<<std::endl;
                 out.open(nfn.c_str());
                 out<<"ID"+sep+"Jaccard\n";
             }
