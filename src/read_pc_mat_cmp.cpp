@@ -1019,7 +1019,7 @@ namespace pc_mat {
 
 
             if (neighbors.index_jaccard.empty()) {
-                // cout << "  No neighbors found" << endl;
+                cout << "  No neighbors found" << endl;
             } 
             else {
                 sort(neighbors.index_jaccard.begin(), neighbors.index_jaccard.end(), 

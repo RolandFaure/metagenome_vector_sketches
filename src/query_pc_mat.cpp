@@ -6,6 +6,7 @@
 #include <omp.h> 
 #include <cassert>
 #include <cmath>
+#include <atomic>
 
 namespace fs = std::filesystem;
 
@@ -38,6 +39,152 @@ std::pair<double, std::string> get_time_unit(double total_time){
     }
 }
 
+std::pair<std::string, std::string> split_path(const std::string& fullpath) {
+    size_t pos = fullpath.find_last_of("/\\");
+    if (pos == std::string::npos) {
+        return {fullpath, "./"};  // no directory
+    }
+
+    std::string filename = fullpath.substr(pos + 1);
+    std::string parent   = fullpath.substr(0, pos);
+    return {filename, parent};
+}
+
+
+void query_nearest_neighbors(
+    std::string matrix_folder, std::string db_folder, std::string query_file,
+    std::vector<std::string>& query_ids_str, bool write_to_file, 
+    bool show_all_neighbors, int64_t top_n, uint32_t batch_size, std::string out_fn, 
+    std::string sep, bool print_to_screen, int num_threads
+) {
+    // --- 1. Load Data ---
+    std::vector<std::string> identifiers;
+    std::unordered_map<std::string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
+    
+    std::vector<std::string> query_id_vec;    
+    std::vector<int32_t> queries;
+
+    if (!query_file.empty()) {
+        queries = pc_mat::read_queries_from_file(query_file, id_to_index, query_id_vec);
+    } else if (!query_ids_str.empty()) {
+        // Convert command line query IDs
+        for (const std::string& query_str : query_ids_str) {
+            int index = pc_mat::parse_query_to_index(query_str, id_to_index);
+            if (index >= 0) {
+                queries.push_back(index);
+            }
+        }
+    } else {
+        show_error_and_exit("Error: No queries specified. Use --query_file, --query_ids");
+    }
+
+    if (queries.empty()) {
+        show_error_and_exit("Error: No valid queries found");
+    }
+    
+    std::vector<float> vector_norms;
+    pc_mat::load_vector_norms(db_folder, vector_norms);
+
+    int total_vectors = identifiers.size();
+    std::cout << "Total vectors loaded: " << total_vectors << std::endl << std::endl;
+    if (total_vectors <= 0) {
+        show_error_and_exit("Error: Could not determine total number of vectors");
+    }
+    
+    auto [fname, out_file_path] = split_path(out_fn);
+    
+    auto start_total = std::chrono::high_resolution_clock::now();
+    
+    size_t total_queries = queries.size();
+    size_t num_batches = (total_queries + batch_size - 1) / batch_size;
+    std::atomic<size_t> completed_queries(0);
+
+    omp_set_num_threads(num_threads);
+    
+    #pragma omp parallel for schedule(dynamic, 1)
+    for (size_t b = 0; b < num_batches; ++b) {
+        size_t start_indx = b * batch_size;
+        size_t end_indx = std::min(start_indx + batch_size, total_queries);
+
+        std::vector<int32_t> sub_queries(
+            queries.begin() + start_indx, 
+            queries.begin() + end_indx
+        );
+
+        std::vector<pc_mat::Result> batch_results = pc_mat::query(
+            matrix_folder, sub_queries, vector_norms, identifiers
+        );
+
+        for (size_t i = 0; i < batch_results.size(); ++i) {
+            const pc_mat::Result& res = batch_results[i];
+            
+            if (print_to_screen) {
+                #pragma omp critical
+                {
+                    std::cout << "Query: " << res.self_id << " #Neighbors: " << res.neighbor_ids.size() << std::endl;
+                }
+            }
+            
+            // File Output: Independent files, no lock needed for writing
+            std::ofstream out;
+            if (write_to_file) {
+                std::string nfn = out_file_path + "/" + res.self_id + "_" + fname;
+                if(res.self_id.empty()){
+                    std::cout<<"Warning: Empty identifier for query index "<< start_indx + i <<". Skipping file write.\n";
+                }
+                
+                #pragma omp critical
+                {
+                    std::cout << "Writing in file: " << nfn << std::endl << std::endl;
+                }
+
+                out.open(nfn.c_str());
+                out << "ID" << sep << "Jaccard\n";
+            }
+
+            int64_t num_neighbors_to_show = show_all_neighbors ? 
+                        res.neighbor_ids.size()
+                        : std::min<int64_t>(top_n, res.neighbor_ids.size());
+
+            if (print_to_screen) {
+                #pragma omp critical
+                {
+                    std::cout << "Top " << num_neighbors_to_show << " neighbors for " << res.self_id << ":\n";
+                    for (size_t j = 0; j < num_neighbors_to_show; ++j) {
+                        std::cout << j + 1 << ". Neighbor: " << res.neighbor_ids[j]
+                                  << " Jaccard Similarity: " << res.jaccard_similarities[j] << std::endl;
+                    }
+                    std::cout << std::endl;
+                }
+            }
+
+            if (write_to_file) {
+                for (size_t j = 0; j < num_neighbors_to_show; ++j) {
+                    out << res.neighbor_ids[j] << sep << res.jaccard_similarities[j] << std::endl;
+                }
+                out.close();
+            }
+        }
+        
+        size_t current_completed = completed_queries.fetch_add(sub_queries.size()) + sub_queries.size();
+        
+        if (b % num_threads == 0 || current_completed == total_queries) {
+            #pragma omp critical 
+            {
+                std::cout << "--------- Progress: " << current_completed << " / " << total_queries << " queries processed ---------" << std::endl;
+            }
+        }
+    }    
+
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll Queries completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
+/*
 void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, std::string query_file,
         std::vector<std::string>& query_ids_str, bool write_to_file, 
         bool show_all_neighbors, int64_t top_n, uint32_t batch_size, std::string out_fn, std::string sep, bool print_to_screen){
@@ -75,6 +222,8 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
         show_error_and_exit("Error: Could not determine total number of vectors" );
     }
     
+    auto [fname, out_file_path] = split_path(out_fn);
+    
     // std::ofstream log_out(matrix_folder + "/neighbors_all.txt");
     std::chrono::duration<double> elapsed = std::chrono::duration<double>::zero();
 
@@ -97,8 +246,8 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
             
             std::ofstream out;
             if(write_to_file) {
-                std::string nfn = res.self_id+"_"+out_fn;
-                if(print_to_screen) std::cout<<"Writing in file: "<<nfn<<std::endl<<std::endl;
+                std::string nfn = out_file_path+"/" + res.self_id+"_"+fname;
+                std::cout<<"Writing in file: "<<nfn<<std::endl<<std::endl;
                 out.open(nfn.c_str());
                 out<<"ID"+sep+"Jaccard\n";
             }
@@ -126,128 +275,13 @@ void query_nearest_neighbors(std::string matrix_folder, std::string db_folder, s
 
     std::cout << "Query completed in "<<std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<< "\n" << std::endl;
 }
-
-/*
-void query_sliced_matrix(std::string matrix_folder, std::string db_folder, std::string row_file, std::string col_file,
-        bool write_to_file, std::string out_fn, uint32_t batch_size, bool print_to_screen, std::string sep,
-        std::string file_extension
-    ){
-    std::vector<string> identifiers;
-    unordered_map<string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
-    
-    std::vector<int32_t> row_query_vec, col_query_vec;
-    std::vector<std::string> row_vec, col_vec;
-    
-    row_query_vec = pc_mat::read_queries_from_file(row_file, id_to_index, row_vec);
-    col_query_vec = pc_mat::read_queries_from_file(col_file, id_to_index, col_vec);
-
-    if (row_query_vec.empty() || col_query_vec.empty()) {
-        show_error_and_exit("Empty row or col accessions.");
-    }
-    
-    std::vector<float> vector_norms;
-    pc_mat::load_vector_norms(db_folder, vector_norms);
-
-    int total_vectors = identifiers.size();
-    std::cout<<"Total vectors loaded: " << total_vectors << endl<<endl;
-    if (total_vectors <= 0) {
-        show_error_and_exit("Error: Could not determine total number of vectors");
-    }
-    std::chrono::duration<double> elapsed = std::chrono::duration<double>::zero();
-    uint64_t start_indx = 0, end_indx;
-
-    std::ofstream out;
-    std::unique_ptr<HighFive::File> hf_ptr;
-    HighFive::DataSetCreateProps props;
-    if(write_to_file) {
-        if(file_extension == "csv" || file_extension == "tsv"){
-            std::cout<<"Writing in file: "<<out_fn<<std::endl<<std::endl;
-            out.open(out_fn.c_str());
-            out<<"Accession"+sep;
-            for(size_t i=0; i<col_vec.size(); i++){
-                out<<col_vec[i]<<sep;
-            } 
-            out<<"\n";
-        }
-        else if(file_extension == "h5"){
-            // std::string filename = "multi_data.h5";
-            hf_ptr = std::make_unique<HighFive::File>(out_fn, 
-                HighFive::File::Overwrite);
-            hsize_t safe_chunk_size = std::min(static_cast<hsize_t>(col_vec.size()), 
-                    static_cast<hsize_t>(16384));
-            props.add(HighFive::Chunking(std::vector<hsize_t>{safe_chunk_size}));
-            props.add(HighFive::Shuffle());
-            props.add(HighFive::Deflate(9));
-        }
-    }
-
-    if(print_to_screen) std::cout<<"Accession\t";
-
-    for(size_t i=0; i<col_vec.size(); i++){
-        if(print_to_screen) std::cout<<col_vec[i]<<"\t";
-    } 
-    if(print_to_screen) std::cout<<"\n";
-    
-    
-    while(1){
-        end_indx = std::min(start_indx + batch_size, row_query_vec.size());
-        std::vector<int32_t> row_sub_queries(row_query_vec.begin()+start_indx, row_query_vec.begin()+end_indx);
-        auto start = std::chrono::high_resolution_clock::now();
-        std::vector<std::vector<float> > all_results = pc_mat::query_sliced(matrix_folder, row_sub_queries, 
-            col_query_vec, total_vectors, vector_norms);
-        auto end = std::chrono::high_resolution_clock::now();
-        elapsed += (end - start);
-        
-        for(int i=0; i< all_results.size(); i++){
-            std::vector<float> & res = all_results[i];
-            
-            if(print_to_screen) std::cout<<row_vec[start_indx + i]<<"\t";
-            if(write_to_file && (file_extension == "csv" || file_extension == "tsv")) 
-                    out<<row_vec[start_indx + i]<<sep;
-            
-            if(print_to_screen || (write_to_file && (file_extension == "csv" || file_extension == "tsv"))){
-                for (size_t j = 0; j < res.size(); ++j) {
-                    if(print_to_screen) std::cout<<res[j]<<"\t";
-                    if(write_to_file && (file_extension == "csv" || file_extension == "tsv")) 
-                            out<<res[j]<<sep;
-                }
-            }
-            
-            if(write_to_file){
-                if(file_extension == "npy" || file_extension == "npz"){
-                    if(start_indx == 0 && i == 0)
-                        cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "w");
-                    else
-                        cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "a");
-                }
-                else if(file_extension == "h5"){
-                    hf_ptr->createDataSet(row_vec[start_indx + i], res, props);
-                }   
-            }
-            if(print_to_screen) std::cout << std::endl;
-            if(write_to_file && (file_extension == "csv" || file_extension == "tsv")) out<<"\n";
-        }
-        
-        auto time_unit = get_time_unit(elapsed.count());
-        std::cout<<"--------- Completed\t"<<end_indx<<"\trows in\t"<<std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<<" ---------\n";
-        
-        if(end_indx == row_query_vec.size()) break;
-        start_indx += batch_size;
-    }
-
-    auto time_unit = get_time_unit(elapsed.count());
-
-    std::cout << "Query completed in " << std::fixed << std::setprecision(2) << time_unit.first<<"\t"<<time_unit.second<<"\n" << std::endl;
-
-    if(write_to_file && (file_extension == "csv" || file_extension == "tsv")) out.close();
-}
 */
-
 void query_sliced_matrix(
     std::string matrix_folder, std::string db_folder, std::string row_file, std::string col_file,
     bool write_to_file, std::string out_fn, uint32_t batch_size, bool print_to_screen, std::string sep,
     std::string file_extension, int num_threads
 ) {
+    // --- 1. Load Data ---
     std::vector<std::string> identifiers;
     std::unordered_map<std::string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
 
@@ -270,13 +304,15 @@ void query_sliced_matrix(
         show_error_and_exit("Error: Could not determine total number of vectors");
     }
 
-    std::ofstream out;
+    // --- 2. Setup Output Files ---
+    std::ofstream out; 
     std::unique_ptr<HighFive::File> hf_ptr;
     HighFive::DataSetCreateProps props;
 
+    // Initialize files (Open once, keep open or append later)
     if (write_to_file) {
+        std::cout << "Writing in file: " << out_fn << std::endl << std::endl;
         if (file_extension == "csv" || file_extension == "tsv") {
-            std::cout << "Writing in file: " << out_fn << std::endl << std::endl;
             out.open(out_fn.c_str());
             // Write Header
             out << "Accession" << sep;
@@ -290,12 +326,15 @@ void query_sliced_matrix(
                                                static_cast<hsize_t>(16384));
             props.add(HighFive::Chunking(std::vector<hsize_t>{safe_chunk_size}));
             props.add(HighFive::Shuffle());
-            props.add(HighFive::Deflate(9));
-        } else if (file_extension == "npy" || file_extension == "npz") {
-            // Initialize NPY file to ensure it exists for appending later
-            std::ofstream clear_file(out_fn, std::ios::out | std::ios::trunc);
-            clear_file.close();
+            props.add(HighFive::Deflate(9)); // how much compression
         }
+        // } else if (file_extension == "npy" || file_extension == "npz") {
+        //     std::vector<float> res;
+        //     cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "w");
+        //     // Initialize/Truncate file so we can safely append later
+        //     // std::ofstream clear_file(out_fn, std::ios::out | std::ios::trunc);
+        //     // clear_file.close();
+        // }
     }
 
     if (print_to_screen) {
@@ -306,40 +345,68 @@ void query_sliced_matrix(
         std::cout << "\n";
     }
 
-    // --- 3. OpenMP Parallel Processing ---
+    // --- 3. Parallel Processing (Block/Wavefront Strategy) ---
     auto start_total = std::chrono::high_resolution_clock::now();
-    
     size_t total_rows = row_query_vec.size();
-    size_t num_batches = (total_rows + batch_size - 1) / batch_size;
+    
+    // Determine the step size for the outer loop: n_threads * batch_size
+    // This is the "Super Batch" size
+    size_t block_step = (size_t)num_threads * batch_size;
+    size_t current_block_start = 0;
 
-    #pragma omp parallel for schedule(dynamic, 1) num_threads(num_threads)
-    for (size_t b = 0; b < num_batches; ++b) {
-        size_t start_indx = b * batch_size;
-        size_t end_indx = std::min(start_indx + batch_size, total_rows);
+    // Buffer to hold results from all threads for the current super-batch
+    // Index: [thread_id][row_index_within_batch][col_index]
+    std::vector<std::vector<std::vector<float>>> thread_buffers(num_threads);
 
-        std::vector<int32_t> row_sub_queries(
-            row_query_vec.begin() + start_indx, 
-            row_query_vec.begin() + end_indx
-        );
+    omp_set_num_threads(num_threads);
 
-        std::vector<std::vector<float>> all_results = pc_mat::query_sliced(
-            matrix_folder, row_sub_queries, col_query_vec, total_vectors, vector_norms
-        );
-
-        #pragma omp critical
+    while (current_block_start < total_rows) {
+        
+        // --- A. Parallel Compute Phase ---
+        #pragma omp parallel
         {
-            for (int i = 0; i < all_results.size(); i++) {
-                std::vector<float>& res = all_results[i];
-                size_t actual_row_idx = start_indx + i;
+            int tid = omp_get_thread_num();
+            size_t my_batch_start = current_block_start + tid * batch_size;
 
+            if (my_batch_start < total_rows) {
+                size_t my_batch_end = std::min(my_batch_start + batch_size, total_rows);
+
+                std::vector<int32_t> row_sub_queries(
+                    row_query_vec.begin() + my_batch_start, 
+                    row_query_vec.begin() + my_batch_end
+                );
+
+                // Compute and store in thread-specific buffer
+                // This runs in parallel, no locks needed as they write to different indices of thread_buffers
+                thread_buffers[tid] = pc_mat::query_sliced(
+                    matrix_folder, row_sub_queries, col_query_vec, total_vectors, vector_norms
+                );
+            } else {
+                // Thread has no work (e.g., end of file), clear buffer
+                thread_buffers[tid].clear();
+            }
+        } // Implicit Barrier: wait for all threads to finish computing
+
+        // --- B. Sequential Write Phase ---
+        // Iterate through threads in order to maintain row sequence
+        for (int t = 0; t < num_threads; ++t) {
+            if (thread_buffers[t].empty()) continue;
+
+            size_t my_batch_start = current_block_start + t * batch_size;
+            std::vector<std::vector<float>>& batch_results = thread_buffers[t];
+
+            for (size_t i = 0; i < batch_results.size(); ++i) {
+                std::vector<float>& res = batch_results[i];
+                size_t actual_row_idx = my_batch_start + i;
+
+                // 1. Screen Output
                 if (print_to_screen) {
                     std::cout << row_vec[actual_row_idx] << "\t";
-                    for (size_t j = 0; j < res.size(); ++j) {
-                        std::cout << res[j] << "\t";
-                    }
+                    for (float val : res) std::cout << val << "\t";
                     std::cout << std::endl;
                 }
 
+                // 2. File Output
                 if (write_to_file) {
                     if (file_extension == "csv" || file_extension == "tsv") {
                         out << row_vec[actual_row_idx] << sep;
@@ -352,16 +419,30 @@ void query_sliced_matrix(
                         hf_ptr->createDataSet(row_vec[actual_row_idx], res, props);
                     } 
                     else if (file_extension == "npy" || file_extension == "npz") {
-                        cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "a");
+                        if (current_block_start == 0 && t == 0 && i == 0)
+                            cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "w");
+                        else
+                            cnpy::npy_save(out_fn, res.data(), {1, res.size()}, "a");
                     }
                 }
             }
-            
-            // order not guaranteed
-            std::cout << "Batch ending at " << end_indx << " processed." << std::endl;
+            // Clear memory for this thread immediately after writing
+            batch_results.clear(); 
         }
+        
+        std::cout << "--------- Completed\t" 
+                  << std::min(current_block_start + block_step, total_rows) 
+                  << "\trows in\t";
+        auto mid_total = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = mid_total - start_total;
+        auto time_unit = get_time_unit(elapsed.count());
+        std::cout << std::fixed << std::setprecision(2) << time_unit.first << "\t" 
+                  << time_unit.second << " ---------\n";
+
+        current_block_start += block_step;
     }
 
+    // --- 4. Cleanup ---
     auto end_total = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_total - start_total;
     auto time_unit = get_time_unit(elapsed.count());
@@ -373,6 +454,7 @@ void query_sliced_matrix(
         out.close();
     }
 }
+
 
 std::string get_file_extension(std::string filename){
     size_t dot_pos = filename.find_last_of(".");
@@ -392,6 +474,7 @@ int main(int argc, char* argv[]) {
     std::string row_file, col_file;
     // string neighbor_fn = "neighbors.txt";
     uint32_t top_n = 10, batch_size = 1000;
+    int n_threads = 1;
     vector<string> query_ids_str;
     bool read_from_stdin = false;
     bool show_help = false;
@@ -417,6 +500,7 @@ int main(int argc, char* argv[]) {
             // | clipp::option("--stdin").set(read_from_stdin)
         ),
         clipp::option("--top") & clipp::value("int", top_n),
+        clipp::option("--thread") & clipp::value("int", n_threads),
         clipp::option("--batch_size") & clipp::value("int", batch_size),
         clipp::option("--write_to_file").set(write_to_file) & clipp::value("file", out_fn),
         clipp::option("--show_all").set(show_all_neighbors),
@@ -437,6 +521,7 @@ int main(int argc, char* argv[]) {
         // cout << "  --stdin          Read query IDs from standard input\n";
         cout << "  --top\t Number of top jaccard values to show [default 10]\n";
         cout << "  --batch_size\t Number of queries to process per batch [default 1000]\n";
+        cout << "  --thread\t Number of threads to use [default 1]\n";
         cout << "  --write_to_file\t Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz/*h5 for row-col query. *.csv/*tsv/*txt for regular query).\n";
         cout << "  --show_all\t Whether to show all neighbors instead of top N\n";
         cout << "  --print\t Whether to print the outputs to screen\n";
@@ -483,7 +568,7 @@ int main(int argc, char* argv[]) {
         
         std::string sep = file_extension == "csv" ? "," : "\t";
         query_nearest_neighbors(matrix_folder, db_folder, query_file, query_ids_str, 
-            write_to_file, show_all_neighbors, top_n, batch_size, out_fn, sep, print_to_screen);
+            write_to_file, show_all_neighbors, top_n, batch_size, out_fn, sep, print_to_screen, n_threads);
     }
     else if(use_row_col_files){
         if(row_file.empty() || col_file.empty()){
@@ -500,7 +585,7 @@ int main(int argc, char* argv[]) {
             sep = file_extension == "csv" ? "," : "\t";
         }
 
-        query_sliced_matrix(matrix_folder, db_folder, row_file, col_file, write_to_file, out_fn, batch_size, print_to_screen, sep, file_extension, 4);
+        query_sliced_matrix(matrix_folder, db_folder, row_file, col_file, write_to_file, out_fn, batch_size, print_to_screen, sep, file_extension, n_threads);
     }
     else{
         std::cerr<<"No query types specified. Aborting...\n";
