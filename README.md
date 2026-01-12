@@ -119,7 +119,7 @@ Options:
 Query the matrix for neighbors of specific IDs listed in a file (`query_strs.txt`):
 
 ```Shell
-../build/query_pc_mat --matrix toy_index --db toy_db/ --query_file query_strs.txt --write_to_file toy_neighbors.txt --show_all
+../build/query_pc_mat --matrix toy_index --db toy_db/ --query_file query_strs.txt --write_to_file toy_neighbors.txt --batch_size 5 --thread 2 --show_all
 ```
 
 This command outputs one file per query ID (e.g., `DRR000821_toy_neighbors.txt`) containing all neighbors, as `--show_all` is specified.
@@ -129,13 +129,13 @@ This command outputs one file per query ID (e.g., `DRR000821_toy_neighbors.txt`)
 Query a slice of the matrix (a sub-matrix) defined by IDs in a row file and a column file:
 
 ```Shell
-../build/query_pc_mat --matrix toy_index --db toy_db/  --row_file row_file.txt --col_file col_file.txt --write_to_file row_col.npy
+../build/query_pc_mat --matrix toy_index --db toy_db/  --row_file row_file.txt --col_file col_file.txt --write_to_file row_col.h5 --batch_size 5 --thread 2
 ```
 
 ```
 Important Output Format Note:
 
-    Sliced (Row-Col) Query: Output file must be *.csv, *.tsv, *.npy, or *.npz.
+    Sliced (Row-Col) Query: Output file must be *.csv, *.tsv, *.npy, *npz or *h5. *h5 gives the most compressed output.
 
     Regular Query: Output file must be *.csv, *.tsv, or *.txt.
 ```
