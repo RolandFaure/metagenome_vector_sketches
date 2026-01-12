@@ -82,16 +82,16 @@ Query Pairwise Comparison Matrix
 
 Usage:
         ../build/query_pc_mat [--matrix <folder>] [--db <folder>] [--query_file <file>] [--top
-                              <int>] [--batch_size <int>] [--write_to_file <file>] [--show_all]
-                              [--print] [--help]
+                              <int>] [--thread <int>] [--batch_size <int>] [--write_to_file <file>]
+                              [--show_all] [--print] [--help]
 
         ../build/query_pc_mat [--matrix <folder>] [--db <folder>] [--query_ids <ids>...] [--top
-                              <int>] [--batch_size <int>] [--write_to_file <file>] [--show_all]
-                              [--print] [--help]
+                              <int>] [--thread <int>] [--batch_size <int>] [--write_to_file <file>]
+                              [--show_all] [--print] [--help]
 
         ../build/query_pc_mat [--matrix <folder>] [--db <folder>] [--row_file <row> [--col_file]
-                              <col>] [--top <int>] [--batch_size <int>] [--write_to_file <file>]
-                              [--show_all] [--print] [--help]
+                              <col>] [--top <int>] [--thread <int>] [--batch_size <int>]
+                              [--write_to_file <file>] [--show_all] [--print] [--help]
 
 Options:
   --matrix       Folder containing the pairwise matrix files
@@ -102,7 +102,8 @@ Options:
   --col_file     File containing query col IDs (one per line)
   --top  Number of top jaccard values to show [default 10]
   --batch_size   Number of queries to process per batch [default 1000]
-  --write_to_file        Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz for row-col query. *.csv/*tsv/*txt for regular query).
+  --thread       Number of threads to use [default 1]
+  --write_to_file        Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz/*h5 for row-col query. *.csv/*tsv/*txt for regular query).
   --show_all     Whether to show all neighbors instead of top N
   --print        Whether to print the outputs to screen
   --help         Show this help message

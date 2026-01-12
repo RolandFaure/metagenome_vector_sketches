@@ -57,7 +57,6 @@ void query_nearest_neighbors(
     bool show_all_neighbors, int64_t top_n, uint32_t batch_size, std::string out_fn, 
     std::string sep, bool print_to_screen, int num_threads
 ) {
-    // --- 1. Load Data ---
     std::vector<std::string> identifiers;
     std::unordered_map<std::string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
     
@@ -67,7 +66,6 @@ void query_nearest_neighbors(
     if (!query_file.empty()) {
         queries = pc_mat::read_queries_from_file(query_file, id_to_index, query_id_vec);
     } else if (!query_ids_str.empty()) {
-        // Convert command line query IDs
         for (const std::string& query_str : query_ids_str) {
             int index = pc_mat::parse_query_to_index(query_str, id_to_index);
             if (index >= 0) {
@@ -128,18 +126,19 @@ void query_nearest_neighbors(
             // File Output: Independent files, no lock needed for writing
             std::ofstream out;
             if (write_to_file) {
-                std::string nfn = out_file_path + "/" + res.self_id + "_" + fname;
-                if(res.self_id.empty()){
+                if(!res.self_id.empty()){
+                    std::string nfn = out_file_path + "/" + res.self_id + "_" + fname;
+                    #pragma omp critical
+                    {
+                        std::cout << "Writing in file: " << nfn << std::endl << std::endl;
+                    }
+                    out.open(nfn.c_str());
+                    out << "ID" << sep << "Jaccard\n";
+                }
+                else{
                     std::cout<<"Warning: Empty identifier for query index "<< start_indx + i <<". Skipping file write.\n";
                 }
                 
-                #pragma omp critical
-                {
-                    std::cout << "Writing in file: " << nfn << std::endl << std::endl;
-                }
-
-                out.open(nfn.c_str());
-                out << "ID" << sep << "Jaccard\n";
             }
 
             int64_t num_neighbors_to_show = show_all_neighbors ? 
@@ -149,16 +148,21 @@ void query_nearest_neighbors(
             if (print_to_screen) {
                 #pragma omp critical
                 {
-                    std::cout << "Top " << num_neighbors_to_show << " neighbors for " << res.self_id << ":\n";
-                    for (size_t j = 0; j < num_neighbors_to_show; ++j) {
-                        std::cout << j + 1 << ". Neighbor: " << res.neighbor_ids[j]
-                                  << " Jaccard Similarity: " << res.jaccard_similarities[j] << std::endl;
+                    if(!res.self_id.empty()){
+                        std::cout << "Top " << num_neighbors_to_show << " neighbors for " << res.self_id << ":\n";
+                        for (size_t j = 0; j < num_neighbors_to_show; ++j) {
+                            std::cout << j + 1 << ". Neighbor: " << res.neighbor_ids[j]
+                                    << " Jaccard Similarity: " << res.jaccard_similarities[j] << std::endl;
+                        }
+                        std::cout << std::endl;
                     }
-                    std::cout << std::endl;
+                    else{
+                        std::cout<<"Warning: Empty identifier for query index "<< start_indx + i <<". Skipping screen output.\n";
+                    }
                 }
             }
 
-            if (write_to_file) {
+            if (write_to_file && !res.self_id.empty()) {
                 for (size_t j = 0; j < num_neighbors_to_show; ++j) {
                     out << res.neighbor_ids[j] << sep << res.jaccard_similarities[j] << std::endl;
                 }
@@ -557,6 +561,11 @@ int main(int argc, char* argv[]) {
     }
 
     if(!write_to_file) print_to_screen = true;
+
+    /**
+     * For nearest neighbor queries, all the queries inside the same batch are executed sequentiallyly inside a single thread.
+     * Different batches are executed in parallel across multiple threads.
+     */
 
     if(use_query_file || use_query_ids){
         std::string file_extension = get_file_extension(out_fn);
