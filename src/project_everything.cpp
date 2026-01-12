@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <unordered_set>
 #include <string>
 #include <algorithm>
@@ -176,39 +177,69 @@ void load_signatures(std::string file_name, std::unordered_set<unsigned long int
 }
 
 
-int main(int argc, char* argv[]) {
-    // CLI with clipp
-    int t = 1;
-    int d = 2048;
-    bool use_int16 = false;
-    std::string folder_name, index_folder;
+// Convert function: Load all signatures and write hashes to a plain text file
+void convert(const std::string& folder_name, const std::string& output_file, int num_threads) {
+    omp_set_num_threads(num_threads);
 
-    auto cli = (
-        clipp::value("input_folder", folder_name),
-        clipp::value("index_folder", index_folder),
-        clipp::option("-t", "--threads") & clipp::integer("threads", t) % "Number of threads (default: 1)",
-        clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)",
-        clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
-    );
+    // Timing start
+    auto start = std::chrono::high_resolution_clock::now();
 
-    if (!clipp::parse(argc, argv, cli)) {
+    // Collect all signature file paths first
+    std::vector<std::string> sig_files;
+    for (const auto& entry : fs::directory_iterator(folder_name)) {
+        sig_files.push_back(entry.path().string());
+    }
 
+    // Open output file
+    std::ofstream hash_out(output_file);
+    if (!hash_out) {
+        std::cerr << "Error opening " << output_file << " for writing." << std::endl;
+        return;
+    }
+
+    // Process each signature file and write hashes
+    std::vector<std::pair<std::string, std::unordered_set<unsigned long int>>> temp_results(sig_files.size());
+
+    // Parallel processing with OpenMP
+    #pragma omp parallel for schedule(dynamic)
+    for (size_t i = 0; i < sig_files.size(); ++i) {
+        std::unordered_set<unsigned long int> hashes;
+        load_signatures(sig_files[i], hashes, omp_get_thread_num());
         
-
-        std::cerr << "Error: Failed to parse command line arguments.\n";
-        std::cerr << "Usage: " << argv[0] << " <input_folder> <index_folder> [-t threads] [-d dimension] [--int16]\n";
-        std::cerr << "  input_folder   : Path to folder containing signature files\n";
-        std::cerr << "  index_folder   : Output folder for generated index files\n";
-        std::cerr << "  -t, --threads  : Number of threads (default: 1)\n";
-        std::cerr << "  -d, --dimension: Vector dimension (default: 2048)\n";
-        std::cerr << "  --int16        : Use int16 instead of int32 for vector storage\n";
-        return 1;
+        // Extract the base name (e.g., DRR111514) from the path
+        std::string stem = fs::path(sig_files[i]).stem().string();
+        std::string base_name = stem.substr(0, stem.find('.'));
+        
+        temp_results[i] = {base_name, std::move(hashes)};
+        
+        #pragma omp critical
+        {
+            cout << "Processed " << sig_files[i] << ", hashes size " << temp_results[i].second.size() << ", file number " << i << endl;
+        }
     }
 
-    omp_set_num_threads(t);
+    // Write all results to file
+    for (const auto& result : temp_results) {
+        hash_out << result.first << ":";
+        for (const auto& h : result.second) {
+            hash_out << " " << h;
+        }
+        hash_out << "\n";
+    }
+    hash_out.close();
+
+    // Timing end
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+    cout << "Time to convert all signatures: " << elapsed.count() << " seconds" << endl;
+}
+
+// Sketch function: Read hashes from plain text file and create vector sketches
+void sketch(const std::string& hash_file, const std::string& index_folder, int dimension, bool use_int16) {
     if (index_folder[index_folder.size()-1] != '/'){
-        index_folder += '/';
+        const_cast<std::string&>(index_folder) += '/';
     }
+    
     // Ensure index_folder exists and is empty
     if (fs::exists(index_folder)) {
         // Remove all contents if not empty
@@ -220,38 +251,51 @@ int main(int argc, char* argv[]) {
         fs::create_directories(index_folder);
     }
 
-
-    std::vector<std::unordered_set<unsigned long int>> all_hash_sets;
-    std::vector<std::pair<int, VectorXi>> all_projected_vectors;
-    // std::vector<std::string> folder_names;
-    int nb_loads = 0;
-
     // Timing start
     auto start = std::chrono::high_resolution_clock::now();
 
-    // Collect all signature file paths first
-    std::vector<std::string> sig_files;
-    for (const auto& entry : fs::directory_iterator(folder_name)) {
-        sig_files.push_back(entry.path().string());
+    // Read hashes from file
+    std::ifstream hash_in(hash_file);
+    if (!hash_in) {
+        std::cerr << "Error opening " << hash_file << " for reading." << std::endl;
+        return;
     }
 
-    // Prepare storage for results
-    std::vector<std::pair<int, VectorXi>> temp_projected_vectors(sig_files.size());
-
-    // Parallel processing with OpenMP
-    #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < sig_files.size(); ++i) {
+    std::vector<std::pair<std::string, std::unordered_set<unsigned long int>>> all_hashes;
+    std::string line;
+    while (std::getline(hash_in, line)) {
+        size_t colon_pos = line.find(':');
+        if (colon_pos == std::string::npos) continue;
+        
+        std::string name = line.substr(0, colon_pos);
         std::unordered_set<unsigned long int> hashes;
-        load_signatures(sig_files[i], hashes, omp_get_thread_num());
-        temp_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_vector(hashes, d)};
+        
+        // Parse hashes
+        std::istringstream iss(line.substr(colon_pos + 1));
+        unsigned long int hash;
+        while (iss >> hash) {
+            hashes.insert(hash);
+        }
+        
+        all_hashes.emplace_back(name, std::move(hashes));
+    }
+    hash_in.close();
+
+    cout << "Loaded " << all_hashes.size() << " hash sets from " << hash_file << endl;
+
+    // Project all hash sets to vectors
+    std::vector<std::pair<int, VectorXi>> all_projected_vectors(all_hashes.size());
+    
+    #pragma omp parallel for schedule(dynamic)
+    for (size_t i = 0; i < all_hashes.size(); ++i) {
+        const auto& hashes = all_hashes[i].second;
+        all_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_vector(hashes, dimension)};
+        
         #pragma omp critical
         {
-            cout << "Processed " << sig_files[i] << ", hashes size " << hashes.size() << ", file number " << i << endl;
+            cout << "Projected " << all_hashes[i].first << ", vector dimension " << dimension << ", index " << i << endl;
         }
     }
- 
-    // Move results to main vector
-    all_projected_vectors = std::move(temp_projected_vectors);
 
     // Timing end
     auto end = std::chrono::high_resolution_clock::now();
@@ -263,23 +307,25 @@ int main(int argc, char* argv[]) {
     std::ofstream dim_out(index_folder + "dimension.txt");
     std::ofstream dtype_out(index_folder + "dtype.txt");
     std::ofstream bin_out(index_folder + "vectors.bin", std::ios::binary);
+    
     if (!norm_out) {
         std::cerr << "Error opening vector_norms.txt for writing." << std::endl;
     }
     if (!bin_out) {
         std::cerr << "Error opening vectors.bin for writing." << std::endl;
     }
+    
     if (norm_out && bin_out && dim_out && dtype_out) {
-        dim_out << d << "\n";
+        dim_out << dimension << "\n";
         dtype_out << (use_int16 ? "int16" : "int32") << "\n";
-        int index_of_vector = 0;
-        for (const auto& pair : all_projected_vectors) {
-            // Extract the base name (DRR111514) from the path
-            std::string stem = fs::path(sig_files[index_of_vector]).stem().string();
-            std::string base_name = stem.substr(0, stem.find('.'));
+        
+        for (size_t index_of_vector = 0; index_of_vector < all_projected_vectors.size(); ++index_of_vector) {
+            const auto& pair = all_projected_vectors[index_of_vector];
+            const std::string& base_name = all_hashes[index_of_vector].first;
+            
             // Cast vec to VectorXf, divide by sqrt(d), then compute norm
             VectorXi vec = pair.second;
-            VectorXf vec_f = pair.second.cast<float>() / std::sqrt(static_cast<float>(d));
+            VectorXf vec_f = pair.second.cast<float>() / std::sqrt(static_cast<float>(dimension));
             double norm = vec_f.norm();
             norm_out << base_name << " " << norm << "\n";
             
@@ -306,64 +352,66 @@ int main(int argc, char* argv[]) {
                     bin_out.write(reinterpret_cast<const char*>(&val), sizeof(int32_t));
                 }
             }
-            index_of_vector++;
         }
+        
         norm_out.close();
         bin_out.close();
         dim_out.close();
         dtype_out.close();
     }
+}
 
-    // std::vector<std::pair<double, double>> jaccard_pairs;
-    // size_t count_above_01 = 0;
-    // for (size_t i = 0; i < all_hash_sets.size(); ++i) {
-    //     for (size_t j = i + 1; j < all_hash_sets.size(); ++j) {
-    //         size_t intersection = 0;
-    //         const auto& set1 = all_hash_sets[i];
-    //         const auto& set2 = all_hash_sets[j];
-    //         for (const auto& hash : set1) {
-    //             if (set2.count(hash)) ++intersection;
-    //         }
-    //         size_t union_size = set1.size() + set2.size() - intersection;
-    //         double jaccard = union_size == 0 ? 0.0 : static_cast<double>(intersection) / union_size;
+int main(int argc, char* argv[]) {
+    // CLI with clipp
+    bool is_convert = false;
+    bool is_sketch = false;
+    std::string input_path, output_path;
+    int t = 1;
+    int d = 2048;
+    bool use_int16 = false;
 
-    //         vector<float> vec1 = all_projected_vectors[i].second;
-    //         int size_1 = all_projected_vectors[i].first;
-    //         vector<float> vec2 = all_projected_vectors[j].second;
-    //         int size_2 = all_projected_vectors[j].first;
+    auto convert_mode = (
+        clipp::command("convert").set(is_convert),
+        clipp::value("signature_folder", input_path) % "Path to folder containing signature files",
+        clipp::value("hash_file", output_path) % "Output hash file path",
+        clipp::option("-t", "--threads") & clipp::integer("threads", t) % "Number of threads (default: 1)"
+    );
 
-    //         // Compute squared Euclidean norm of the difference between the two vectors
-    //         double squared_norm = 0.0;
-    //         for (int k = 0; k < d; ++k) {
-    //             double diff = vec1[k] - vec2[k];
-    //             squared_norm += diff * diff;
-    //         }
+    auto sketch_mode = (
+        clipp::command("sketch").set(is_sketch),
+        clipp::value("hash_file", input_path) % "Input hash file path",
+        clipp::value("index_folder", output_path) % "Output folder for index files",
+        clipp::option("-t", "--threads") & clipp::integer("threads", t) % "Number of threads (default: 1)",
+        clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)",
+        clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
+    );
 
-    //         double estimated_jaccard = (size_1 + size_2 - squared_norm) / (size_1 + size_2 + squared_norm);
+    auto cli = (
+        (convert_mode | sketch_mode)
+    );
 
-    //         jaccard_pairs.emplace_back(jaccard, estimated_jaccard);
+    if (!clipp::parse(argc, argv, cli) || (!is_convert && !is_sketch)) {
+        std::cerr << "Usage:\n";
+        std::cerr << "  Convert mode:\n";
+        std::cerr << "    " << argv[0] << " convert <signature_folder> <hash_file> [-t threads]\n";
+        std::cerr << "      signature_folder : Path to folder containing signature files\n";
+        std::cerr << "      hash_file        : Output hash file path\n";
+        std::cerr << "      -t, --threads    : Number of threads (default: 1)\n\n";
+        std::cerr << "  Sketch mode:\n";
+        std::cerr << "    " << argv[0] << " sketch <hash_file> <index_folder> [-t threads] [-d dimension] [--int16]\n";
+        std::cerr << "      hash_file        : Input hash file path\n";
+        std::cerr << "      index_folder     : Output folder for index files\n";
+        std::cerr << "      -t, --threads    : Number of threads (default: 1)\n";
+        std::cerr << "      -d, --dimension  : Vector dimension (default: 2048)\n";
+        std::cerr << "      --int16          : Use int16 instead of int32 for vector storage\n";
+        return 1;
+    }
 
-    //         if (jaccard >= 0.1){
-    //             cout << folder_names[i] << " vs " << folder_names[j] << ": " << jaccard
-    //                  << " : " << estimated_jaccard << endl;
-    //         }
-    //         if (jaccard > 0.1) ++count_above_01;
-    //     }
-    // }
-
-    // // Output each (x, y) pair to points.txt, one per line
-    // std::ofstream outfile("points.txt");
-    // if (!outfile) {
-    //     std::cerr << "Error opening points.txt for writing." << std::endl;
-    // } else {
-    //     for (const auto& pair : jaccard_pairs) {
-    //         if (pair.first >= 0.0){
-    //             outfile << pair.first << " " << pair.second << "\n";
-    //         }
-    //     }
-    //     outfile.close();
-    // }
-    // cout << "Number of pairwise Jaccard distances above 0.1: " << count_above_01 << endl;
+    if (is_convert) {
+        convert(input_path, output_path, t);
+    } else if (is_sketch) {
+        sketch(input_path, output_path, d, use_int16);
+    }
 
     return 0;
 }
