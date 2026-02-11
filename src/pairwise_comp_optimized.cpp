@@ -29,12 +29,14 @@ struct SparseResult {
     vector<int64_t> values;
 };
 
+using MatrixXll = Eigen::Matrix<int64_t, Eigen::Dynamic, Eigen::Dynamic>;
+
 // Load a block of vectors from binary file
-MatrixXi load_matrix_block(const string& file_path, int dimension, int begin, int end) {
+MatrixXll load_matrix_block(const string& file_path, int dimension, int begin, int end) {
     ifstream file(file_path, ios::binary);
     if (!file) {
         cerr << "Error opening file: " << file_path << endl;
-        return MatrixXi();
+        return MatrixXll();
     }
     
     uint64_t vector_size = dimension * sizeof(int32_t);
@@ -43,7 +45,7 @@ MatrixXi load_matrix_block(const string& file_path, int dimension, int begin, in
     vector<int32_t> buffer(num_vectors * dimension);
     file.read(reinterpret_cast<char*>(buffer.data()), num_vectors * vector_size);
     
-    MatrixXi matrix(dimension, num_vectors);
+    MatrixXll matrix(dimension, num_vectors);
     for (int i = 0; i < num_vectors; ++i) {
         for (int j = 0; j < dimension; ++j) {
             matrix(j, i) = buffer[i * dimension + j];
@@ -55,8 +57,8 @@ MatrixXi load_matrix_block(const string& file_path, int dimension, int begin, in
 
 // Optimized sparse dot product computation with early threshold checking
 SparseResult compute_sparse_dot_products_optimized(
-    const MatrixXi& block_i, 
-    const MatrixXi& block_j, 
+    const MatrixXll& block_i, 
+    const MatrixXll& block_j, 
     const VectorXd& norms_i, 
     const VectorXd& norms_j,
     int dimension) {
@@ -132,7 +134,7 @@ SparseResult compute_sparse_dot_products_optimized(
     //     }
     // }
 
-    MatrixXi dot_products = block_i.transpose() * block_j;
+    MatrixXll dot_products = block_i.transpose() * block_j;
     // Go through the solution and apply the threshold
     for (int i = 0; i < dot_products.rows(); ++i) {
         for (int j = 0; j < dot_products.cols(); ++j) {
@@ -159,14 +161,15 @@ SparseResult compute_sparse_dot_products_optimized(
     return result;
 }
 
+/*
 // Compute squared norms efficiently
-VectorXd compute_norms_squared(const MatrixXi& matrix) {
+VectorXd compute_norms_squared(const MatrixXll& matrix) {
     VectorXd norms(matrix.cols());
     
     #pragma omp parallel for
     for (int i = 0; i < matrix.cols(); ++i) {
 
-        const int* row_i = &matrix(0, i);
+        const int64_t* row_i = &matrix(0, i);
         
         uint64_t norm_sq = 0;
         int k = 0;
@@ -188,6 +191,7 @@ VectorXd compute_norms_squared(const MatrixXi& matrix) {
     
     return norms;
 }
+*/
 
 // Write sparse results to file (simple format)
 void write_sparse_results_prev(const string& folder, 
@@ -805,7 +809,7 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
     // cv_vb.save(vbyte_out);
     // vbyte_out.close();
     // ngh_space += cv_vb.num_bytes();
-    std::cout<<"Jac space: "<<jac_space<<" ngh space: "<<ngh_space<<std::endl;
+    // std::cout<<"Jac space: "<<jac_space<<" ngh space: "<<ngh_space<<std::endl;
 
     // Compress the output files using zstd and remove the originals
     // string cmd1 = "zstd -f " + bin_filename + " && rm -f " + bin_filename;
@@ -871,7 +875,7 @@ int main(int argc, char* argv[]) {
             dim_in.close();
         }
     }
-    cout << "dtypeqs: " << dtype << endl;
+    cout << "dtypeqs: " << dtype << " dimension: " << dimension << endl;
 
     if (dtype == "int16"){
         cout << "dtyeom" << endl;
@@ -945,7 +949,7 @@ int main(int argc, char* argv[]) {
         int begin_row = shard_idx * rows_per_shard;
         int end_row = min(begin_row + rows_per_shard, total_vectors);
 
-        // begin_row = 9599;
+        // begin_row = 1372094;
         // end_row = begin_row + 2;
 
         cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row << endl;
@@ -956,7 +960,7 @@ int main(int argc, char* argv[]) {
             int end_i = min(begin_i + size_of_chunk, end_row);
 
             // auto t_blocki_start = chrono::high_resolution_clock::now();
-            MatrixXi block_i = load_matrix_block(matrix_file, dimension, begin_i, end_i);
+            MatrixXll block_i = load_matrix_block(matrix_file, dimension, begin_i, end_i);
             VectorXd norms_i = Map<VectorXd>(all_norms.data() + begin_i, end_i - begin_i);
 
             // auto t_blocki_end = chrono::high_resolution_clock::now();
@@ -965,7 +969,7 @@ int main(int argc, char* argv[]) {
                 int end_j = min(begin_j + size_of_chunk, total_vectors);
 
                 // auto t_blockj_start = chrono::high_resolution_clock::now();
-                MatrixXi block_j = load_matrix_block(matrix_file, dimension, begin_j, end_j);
+                MatrixXll block_j = load_matrix_block(matrix_file, dimension, begin_j, end_j);
                 VectorXd norms_j = Map<VectorXd>(all_norms.data() + begin_j, end_j - begin_j);
                 // auto t_blockj_end = chrono::high_resolution_clock::now();
 

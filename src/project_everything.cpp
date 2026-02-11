@@ -276,7 +276,7 @@ void sketch(const std::string& hash_file, const std::string& index_folder, int d
         while (iss >> hash) {
             hashes.insert(hash);
         }
-        
+        if(hashes.empty()) continue;
         all_hashes.emplace_back(name, std::move(hashes));
     }
     hash_in.close();
@@ -327,6 +327,10 @@ void sketch(const std::string& hash_file, const std::string& index_folder, int d
             VectorXi vec = pair.second;
             VectorXf vec_f = pair.second.cast<float>() / std::sqrt(static_cast<float>(dimension));
             double norm = vec_f.norm();
+            // if(norm == 0) continue;
+            if(norm == 0.0) {
+                std::cerr << "Warning: Vector for " << base_name << " has zero norm." << std::endl; // should create a log file instead
+            }
             norm_out << base_name << " " << norm << "\n";
             
             if (use_int16) {

@@ -605,6 +605,7 @@ namespace pc_mat {
         unordered_map<int, std::vector<uint32_t> > shard_to_queries;
         for (uint32_t i = 0; i < rows.size(); ++i) {
             int shard_idx = get_shard_for_row(rows[i], total_vectors, num_shards);
+            // int shard_idx = 0;
             shard_to_queries[shard_idx].emplace_back(i);
         }
 
