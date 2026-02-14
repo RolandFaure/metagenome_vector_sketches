@@ -94,13 +94,19 @@ std::string read_gzipped_file(const std::string& gz_path) {
 void load_signatures(std::string file_name, std::unordered_set<unsigned long int> &hashes, int thread_id){
     // file_name is a zip file containing a "signatures" folder
     // In this folder are gzipped files with JSON arrays containing "mins"
-    std::string temp_dir = "/tmp/signature_extract"+std::to_string(thread_id);
+    std::string temp_dir = "/tmp/signature_extract"+std::to_string(thread_id+1);
     std::string unzip_cmd = "unzip -qq -o " + file_name + " -d " + temp_dir + " 2>/dev/null";
     int ret = system(unzip_cmd.c_str());
     if (ret != 0) {
-        std::cerr << "Failed to unzip: " << file_name << std::endl;
+        std::cerr << "Failed to unzip: " << file_name<<" "
+        << unzip_cmd
+         << std::endl;
         return;
     }
+    // else{
+        // std::cerr << unzip_cmd
+        //  << std::endl;
+    // }
     std::string sig_folder = temp_dir + "/signatures";
     for (const auto& entry : fs::directory_iterator(sig_folder)) {
         if (entry.path().extension() == ".gz") {
@@ -365,10 +371,126 @@ void sketch(const std::string& hash_file, const std::string& index_folder, int d
     }
 }
 
+void convert_and_sketch(const std::string& folder_name, const std::string& index_folder, int dimension, bool use_int16, int num_threads)
+{
+    omp_set_num_threads(num_threads);
+    if (index_folder[index_folder.size()-1] != '/'){
+        const_cast<std::string&>(index_folder) += '/';
+    }
+    
+    // Ensure index_folder exists and is empty
+    if (fs::exists(index_folder)) {
+        // Remove all contents if not empty
+        for (const auto& entry : fs::directory_iterator(index_folder)) {
+            fs::remove_all(entry.path());
+        }
+    } else {
+        // Create the directory if it doesn't exist
+        fs::create_directories(index_folder);
+    }
+
+
+    std::vector<std::unordered_set<unsigned long int>> all_hash_sets;
+    std::vector<std::pair<int, VectorXi>> all_projected_vectors;
+    // std::vector<std::string> folder_names;
+    int nb_loads = 0;
+
+    // Timing start
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // Collect all signature file paths first
+    std::vector<std::string> sig_files;
+    for (const auto& entry : fs::directory_iterator(folder_name)) {
+        sig_files.push_back(entry.path().string());
+    }
+
+    // Prepare storage for results
+    std::vector<std::pair<int, VectorXi>> temp_projected_vectors(sig_files.size());
+
+    // Parallel processing with OpenMP
+    #pragma omp parallel for schedule(dynamic)
+    for (size_t i = 0; i < sig_files.size(); ++i) {
+        std::unordered_set<unsigned long int> hashes;
+        load_signatures(sig_files[i], hashes, omp_get_thread_num());
+        temp_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_vector(hashes, dimension)};
+        #pragma omp critical
+        {
+            cout << "Processed " << sig_files[i] << ", hashes size " << hashes.size() << ", file number " << i << endl;
+        }
+    }
+ 
+    // Move results to main vector
+    all_projected_vectors = std::move(temp_projected_vectors);
+
+    // Timing end
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+    cout << "Time to compute all projected vectors: " << elapsed.count() << " seconds" << endl;
+
+    // Output norms and names to a text file, and all vectors as byte-packed int32/int16 to a binary file
+    std::ofstream norm_out(index_folder + "vector_norms.txt");
+    std::ofstream dim_out(index_folder + "dimension.txt");
+    std::ofstream dtype_out(index_folder + "dtype.txt");
+    std::ofstream bin_out(index_folder + "vectors.bin", std::ios::binary);
+    if (!norm_out) {
+        std::cerr << "Error opening vector_norms.txt for writing." << std::endl;
+    }
+    if (!bin_out) {
+        std::cerr << "Error opening vectors.bin for writing." << std::endl;
+    }
+    if (norm_out && bin_out && dim_out && dtype_out) {
+        dim_out << dimension << "\n";
+        dtype_out << (use_int16 ? "int16" : "int32") << "\n";
+        int index_of_vector = 0;
+        for (const auto& pair : all_projected_vectors) {
+            // Extract the base name (DRR111514) from the path
+            std::string stem = fs::path(sig_files[index_of_vector]).stem().string();
+            std::string base_name = stem.substr(0, stem.find('.'));
+            // Cast vec to VectorXf, divide by sqrt(d), then compute norm
+            VectorXi vec = pair.second;
+            VectorXf vec_f = pair.second.cast<float>() / std::sqrt(static_cast<float>(dimension));
+            double norm = vec_f.norm();
+            if(norm == 0) continue;
+            norm_out << base_name << " " << norm << "\n";
+            
+            if (use_int16) {
+                // Write vector as int16_t, byte-packed, with overflow capping
+                constexpr int16_t int16_max = std::numeric_limits<int16_t>::max();
+                constexpr int16_t int16_min = std::numeric_limits<int16_t>::min();
+                for (int i = 0; i < vec.size(); ++i) {
+                    int32_t val32 = static_cast<int32_t>(vec[i]);
+                    int16_t val16;
+                    if (val32 > int16_max) {
+                        val16 = int16_max;
+                    } else if (val32 < int16_min) {
+                        val16 = int16_min;
+                    } else {
+                        val16 = static_cast<int16_t>(val32);
+                    }
+                    bin_out.write(reinterpret_cast<const char*>(&val16), sizeof(int16_t));
+                }
+            } else {
+                // Write vector as int32_t, byte-packed
+                std::cout<<vec.size()<<std::endl;
+                for (int i = 0; i < vec.size(); ++i) {
+                    int32_t val = static_cast<int32_t>(vec[i]);
+                    bin_out.write(reinterpret_cast<const char*>(&val), sizeof(int32_t));
+                }
+            }
+            index_of_vector++;
+        }
+        norm_out.close();
+        bin_out.close();
+        dim_out.close();
+        dtype_out.close();
+    }
+}
+
 int main(int argc, char* argv[]) {
     // CLI with clipp
     bool is_convert = false;
     bool is_sketch = false;
+    bool is_convert_and_sketch = false;
     std::string input_path, output_path;
     int t = 1;
     int d = 2048;
@@ -390,11 +512,20 @@ int main(int argc, char* argv[]) {
         clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
     );
 
-    auto cli = (
-        (convert_mode | sketch_mode)
+    auto convert_and_sketch_mode = (
+        clipp::command("cas").set(is_convert_and_sketch),
+        clipp::value("input_folder", input_path),
+        clipp::value("index_folder", output_path),
+        clipp::option("-t", "--threads") & clipp::integer("threads", t) % "Number of threads (default: 1)",
+        clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)",
+        clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
     );
 
-    if (!clipp::parse(argc, argv, cli) || (!is_convert && !is_sketch)) {
+    auto cli = (
+        (convert_mode) | (sketch_mode) | (convert_and_sketch_mode)
+    );
+
+    if (!clipp::parse(argc, argv, cli) || (!is_convert && !is_sketch && !is_convert_and_sketch)) {
         std::cerr << "Usage:\n";
         std::cerr << "  Convert mode:\n";
         std::cerr << "    " << argv[0] << " convert <signature_folder> <hash_file> [-t threads]\n";
@@ -408,6 +539,14 @@ int main(int argc, char* argv[]) {
         std::cerr << "      -t, --threads    : Number of threads (default: 1)\n";
         std::cerr << "      -d, --dimension  : Vector dimension (default: 2048)\n";
         std::cerr << "      --int16          : Use int16 instead of int32 for vector storage\n";
+
+        std::cerr << "  Convert & Sketch mode:\n";
+        std::cerr << "    " << argv[0] << " cas <signature_folder> <index_folder> [-t threads] [-d dimension] [--int16]\n";
+        std::cerr << "  signature_folder   : Path to folder containing signature files\n";
+        std::cerr << "  index_folder   : Output folder for generated index files\n";
+        std::cerr << "  -t, --threads  : Number of threads (default: 1)\n";
+        std::cerr << "  -d, --dimension: Vector dimension (default: 2048)\n";
+        std::cerr << "  --int16        : Use int16 instead of int32 for vector storage\n";
         return 1;
     }
 
@@ -415,6 +554,9 @@ int main(int argc, char* argv[]) {
         convert(input_path, output_path, t);
     } else if (is_sketch) {
         sketch(input_path, output_path, d, use_int16);
+    }
+    else if(is_convert_and_sketch){
+        convert_and_sketch(input_path, output_path, d, use_int16, t);
     }
 
     return 0;
