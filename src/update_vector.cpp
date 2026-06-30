@@ -1,0 +1,140 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <unordered_set>
+#include <string>
+#include <algorithm>
+#include <filesystem>
+#include <vector>
+#include <cmath>
+#include <limits>
+
+using namespace std;
+vector<std::pair<string, double>> get_sample_norm_vec(std::ifstream& norms_in){
+    // vector<double> all_norms;
+    vector<std::pair<std::string, double>> sample_norm_vec;
+    string line;
+    while (getline(norms_in, line)) {
+        std::stringstream ss(line);
+        string sample;
+        double value;
+        ss >>sample >> value;
+        sample_norm_vec.emplace_back(std::make_pair(sample, value));
+    }
+    return sample_norm_vec;
+}
+
+void add_human_data(const std::string &db_folder, size_t dimension,
+        std::ofstream& vec_out, std::ofstream& meta_out){
+    
+    std::ifstream human_vec_in (db_folder + "human_vectors.bin", std::ios::binary);
+    if (!human_vec_in) {
+        std::cerr << "Failed to open human_vectors.bin\n";
+        return;
+    }
+    vector<int32_t> buffer(dimension);
+    const size_t bytes_per_vector = dimension * sizeof(int32_t);
+    human_vec_in.read(reinterpret_cast<char*>(buffer.data()), bytes_per_vector);
+    
+    if (!human_vec_in) {
+        std::cerr << "Failed to read human vector\n";
+        return;
+    }
+    
+    vec_out.write(reinterpret_cast<char*>(buffer.data()), bytes_per_vector);
+    if (!vec_out) {
+        std::cerr << "Human vec Write error\n";
+        return;
+    }
+    meta_out << "human_genome_sketches_merged 1960.17\n";
+    if (!meta_out) {
+        std::cerr << "Human meta Write error\n";
+        return;
+    }
+}
+
+void filter_and_write(
+    const std::vector<std::pair<std::string, double>>& sample_norm_vec,
+    const std::string& db_folder,
+    const size_t dimension)
+{
+    const size_t block_size = 2048;               // vectors per block
+    const size_t bytes_per_vector = dimension * sizeof(int32_t);
+
+    std::ifstream vec_in(db_folder + "vectors.bin", std::ios::binary);
+    if (!vec_in) {
+        std::cerr << "Failed to open input binary file\n";
+        return;
+    }
+
+    std::ofstream vec_out(db_folder + "filtered_vectors.bin", std::ios::binary);
+    std::ofstream meta_out(db_folder + "filtered_sample_norm.txt");
+
+    if (!vec_out || !meta_out) {
+        std::cerr << "Failed to open output files\n";
+        return;
+    }
+
+    size_t total_vectors = sample_norm_vec.size();
+
+    for (size_t begin = 0; begin < total_vectors; begin += block_size) {
+        std::cout<<"Processing block: "<<begin<<"\n";
+
+        size_t end = std::min(begin + block_size, total_vectors);
+        size_t num_vectors = end - begin;
+
+        // contiguous block buffer
+        std::vector<int32_t> buffer(num_vectors * dimension);
+
+        vec_in.read(reinterpret_cast<char*>(buffer.data()),
+                    num_vectors * bytes_per_vector);
+
+        if (!vec_in) {
+            std::cerr << "Error reading block\n";
+            return;
+        }
+
+        // ---- Filter directly from buffer ----
+        for (size_t i = 0; i < num_vectors; ++i) {
+
+            size_t global_i = begin + i;
+
+            if (sample_norm_vec[global_i].second == 0)
+                continue;
+
+            // pointer to this vector inside the block
+            int32_t* vec_ptr = buffer.data() + i * dimension;
+
+            // write directly
+            vec_out.write(reinterpret_cast<char*>(vec_ptr),
+                          bytes_per_vector);
+
+            meta_out << sample_norm_vec[global_i].first << " "
+                     << sample_norm_vec[global_i].second << "\n";
+        }
+    }
+    add_human_data(db_folder, dimension, vec_out, meta_out);
+    
+    vec_in.close();
+    vec_out.close();
+    meta_out.close();
+}
+
+
+
+
+void read_and_filter_vec(std::string &db_folder){
+    int32_t dimension = 2048;
+
+    std::ifstream norm_in(db_folder + "vector_norms.txt");
+
+    vector<pair<string, double>> sample_norm_vec = get_sample_norm_vec(norm_in);
+    filter_and_write(sample_norm_vec, db_folder, dimension);
+}
+
+int main(int argc, char* argv[]) {
+    std::string db_folder = argv[1];
+    read_and_filter_vec(db_folder);
+
+    return 0;
+}

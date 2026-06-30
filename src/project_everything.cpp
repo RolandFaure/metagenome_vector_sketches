@@ -486,6 +486,7 @@ void convert_and_sketch(const std::string& folder_name, const std::string& index
     }
 }
 
+
 int main(int argc, char* argv[]) {
     // CLI with clipp
     bool is_convert = false;

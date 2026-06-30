@@ -74,66 +74,6 @@ SparseResult compute_sparse_dot_products_optimized(
     local_cols.reserve(1000);
     local_values.reserve(1000);
     
-    // // Aggressively optimized dot product computation for CPU (cache, SIMD, OpenMP)
-    // #pragma omp for schedule(dynamic, 4) collapse(1)
-    // for (int i = 0; i < block_i.cols(); ++i) {
-    //     const int* col_i = &block_i(0, i);
-
-    //     // Prefetch next column of block_i to L1 cache (if available)
-    //     if (i + 1 < block_i.cols()) {
-    //         __builtin_prefetch(&block_i(0, i + 1), 0, 1);
-    //     }
-
-    //     for (int j = 0; j < block_j.cols(); ++j) {
-    //         const int* col_j = &block_j(0, j);
-
-    //         // Prefetch next column of block_j to L1 cache (if available)
-    //         if (j + 1 < block_j.cols()) {
-    //             __builtin_prefetch(&block_j(0, j + 1), 0, 1);
-    //         }
-
-    //         double threshold = 0.05 * (norms_i(i) + norms_j(j)); // norms are squared
-
-    //         int64_t dot_product = 0;
-    //         int k = 0;
-
-    //         // SIMD-friendly loop: process in chunks of 8 (if possible)
-    //         #if defined(__AVX2__)
-    //             __m256i acc = _mm256_setzero_si256();
-    //         for (; k <= dimension - 8; k += 8) {
-    //             __m256i vi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_i[k]));
-    //             __m256i vj = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&col_j[k]));
-    //             __m256i prod = _mm256_mullo_epi32(vi, vj);
-    //             acc = _mm256_add_epi32(acc, prod);
-    //         }
-    //         // Horizontal sum of acc
-    //         alignas(32) int32_t tmp[8];
-    //         _mm256_store_si256(reinterpret_cast<__m256i*>(tmp), acc);
-    //         for (int t = 0; t < 8; ++t) dot_product += tmp[t];
-    //         #endif
-
-    //         // Fallback for remaining elements or non-AVX2
-    //         for (; k <= dimension - 4; k += 4) {
-    //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-    //             dot_product += static_cast<int64_t>(col_i[k+1]) * col_j[k+1];
-    //             dot_product += static_cast<int64_t>(col_i[k+2]) * col_j[k+2];
-    //             dot_product += static_cast<int64_t>(col_i[k+3]) * col_j[k+3];
-    //         }
-    //         for (; k < dimension; ++k) {
-    //             dot_product += static_cast<int64_t>(col_i[k]) * col_j[k];
-    //         }
-
-    //         // Early exit if dot_product cannot reach threshold (optional, for sparse data)
-    //         // Not implemented here due to integer overflow risk
-
-    //         if (static_cast<double>(dot_product) / dimension > threshold) {
-    //             local_rows.push_back(i);
-    //             local_cols.push_back(j);
-    //             local_values.push_back(dot_product);
-    //         }
-    //     }
-    // }
-
     MatrixXll dot_products = block_i.transpose() * block_j;
     // Go through the solution and apply the threshold
     for (int i = 0; i < dot_products.rows(); ++i) {
@@ -713,11 +653,13 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
 
         // Record this row index and its stored position 
         uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
-        row_vec[indx] = row;
+        
+        // FIXME: The row values should be just consecutive values [everyone has at least one neighbor (self)], hence do not need to store these
+        // the first row value can be calculated from the shard value
+        row_vec[indx] = row; 
         curr_pos_vec[indx] = current_pos;
     
         start_neighbor[indx++] = neighbor_indx_vec[0];
-        // start_neighbor[indx] = neighbor_indx_vec[0]; //FIXME: indx++ if not vbyte
         
         std::vector<uint64_t> delta_cols(neighbor_indx_vec.size()-1);
         for (size_t k = 1; k < neighbor_indx_vec.size(); ++k) {
@@ -739,12 +681,6 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         rs_delta.encode(delta_cols.begin(), delta_cols.size());
         rs_delta.save(bin_out);
 
-        
-
-        
-        
-        
-
         // if(row == 9599){
         //     std::cout<<row<<" "<<current_pos
         //         <<" "<<rs_delta.size()+1<<" "<<neighbor_indx_vec.size()<<" "<< neighbor_indx_vec[0]
@@ -759,7 +695,7 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         // jac_space += rs_jac.num_bytes();
         // ngh_space += bytes_written;
         // ngh_space += ngh_rs.num_bytes();
-        ngh_space += rs_delta.num_bytes();
+        // ngh_space += rs_delta.num_bytes();
         // ngh_space += cv_delta.num_bytes();
         // ngh_space += bytes_written;
         
@@ -788,11 +724,11 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
 
     std::string neighbor_fn = folder + "neighbor_start.bin";
     std::ofstream ngh_out(neighbor_fn, std::ios::binary);
-    bits::rice_sequence<> rs_start;
+    bits::rice_sequence<> rs_start; // FIXME: Rice encoding should not be the best possible options. The values will be widely distributed
     rs_start.encode(start_neighbor.begin(), start_neighbor.size());
     rs_start.save(ngh_out);
     ngh_out.close();
-    ngh_space += rs_start.num_bytes();
+    // ngh_space += rs_start.num_bytes();
 
     // std::string vbyte_fn = folder + "vbyte.bin";
     // std::ofstream vbyte_out(vbyte_fn, std::ios::binary);
@@ -990,16 +926,8 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
-
-        // Write results to the shard subfolder
-        // write_sparse_results_prev(shard_folder, all_results, dimension);
-        // write_sparse_results(shard_folder, all_results, dimension);
-        // write_sparse_results_rice(shard_folder, all_results, dimension);
-        // write_sparse_results_vbyte(shard_folder, all_results, dimension);
-        // write_sparse_results_jaccard(shard_folder, all_results, all_norms ,dimension);
         write_sparse_results_jaccard_wo_sort(shard_folder, all_results, all_norms ,dimension);
-        // }
-
+        
         auto end_time = chrono::high_resolution_clock::now();
         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
 

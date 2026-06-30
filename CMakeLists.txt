@@ -92,6 +92,10 @@ add_executable(query_ava_matrix
 )
 target_include_directories(query_ava_matrix PRIVATE ${EIGEN_INCLUDE_DIR})
 
+add_executable(update_vec
+    src/update_vector.cpp
+)
+
 
 add_library(pc_mat_lib STATIC src/read_pc_mat.cpp)
 set_target_properties(pc_mat_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
