@@ -16,7 +16,7 @@ cd metagenome_vector_sketches
 git submodule update --init --recursive
 ```
 
-### Set Up the Conda Environment
+<!-- ### Set Up the Conda Environment
 
 Create a new Conda environment named faiss_env and install the required dependencies, including FAISS for fast similarity search.
 
@@ -25,21 +25,17 @@ conda create -n faiss_env python=3.12
 conda activate faiss_env
 conda install -c pytorch faiss-cpu
 conda install -c conda-forge pybind11 scipy matplotlib pandas hdf5 h5py
-```
+``` -->
 ### Build the Executables
 
-Navigate back to the main directory, create a build folder, and compile the C++ code using cmake. This step generates all necessary executables inside the build folder.
+Create a build folder, and compile the C++ code using cmake. This step generates all necessary executables inside the build folder.
 
 ```Shell
 cd metagenome_vector_sketches
 mkdir build
 cd build
-cmake -DHDF5_ROOT=$CONDA_PREFIX \
-      -DPython_EXECUTABLE=$(which python) \
-      -DPython_ROOT_DIR=$CONDA_PREFIX \
-      -DPython_FIND_STRATEGY=LOCATION \
-      ..
-cmake --build . -j 8
+cmake ..      
+make -j 8
 ```
 
 ## 🚀 Usage Examples
