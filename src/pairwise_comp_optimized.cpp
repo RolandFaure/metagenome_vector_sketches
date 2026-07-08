@@ -140,7 +140,7 @@ SparseResult compute_sparse_dot_products_optimized(
         for (int j = 0; j < dot_products.cols(); ++j) {
             double threshold = 0.05 * (norms_i(i) + norms_j(j));
             int64_t dot_product = dot_products(i, j);
-            if (dot_product / dimension > threshold) {
+            if (static_cast<double>(dot_product) / dimension > threshold) { 
                 local_rows.push_back(i);
                 local_cols.push_back(j);
                 local_values.push_back(dot_product);
@@ -889,7 +889,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (!db_folder.empty() && db_folder.back() != '/' && db_folder.back() != '\\') {
-            output_folder += '/';
+            db_folder += '/';
         }
 
         matrix_file = db_folder + "vectors.bin";
