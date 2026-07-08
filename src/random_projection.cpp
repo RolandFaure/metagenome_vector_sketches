@@ -7,10 +7,11 @@
 #include <string>
 
 VectorXi transform_set_into_vector(const std::unordered_set<unsigned long int> &hashes, int d){
+    int spacing_seed_factor = int(d / 64);
     VectorXi vec = VectorXi::Zero(d);
     for (const auto& hash : hashes) {
         for (int i = 0; i < d; i += 64) {
-            uint64_t x = static_cast<uint64_t>(hash) + static_cast<uint64_t>(i);
+            uint64_t x = static_cast<uint64_t>(hash) + static_cast<uint64_t>(i * spacing_seed_factor);
             x += 0x9e3779b97f4a7c15;
             x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9;
             x = (x ^ (x >> 27)) * 0x94d049bb133111eb;
