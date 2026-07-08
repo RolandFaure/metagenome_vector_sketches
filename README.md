@@ -40,6 +40,7 @@ cmake -DHDF5_ROOT=$CONDA_PREFIX \
       -DPython_FIND_STRATEGY=LOCATION \
       ..
 cmake --build . -j 8
+
 ```
 
 ## 🚀 Usage Examples
