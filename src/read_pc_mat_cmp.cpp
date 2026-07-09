@@ -133,7 +133,7 @@ namespace pc_mat {
         row_to_address_map[curr_row] = std::make_pair(0, 0);
         uint32_t prev_row = curr_row;
         
-        for (size_t i = 1; i < end_row; ++i) {
+        for (size_t i = 1; i < delta_address_cv.size()+1; ++i) {
             // std::cout<<"Loaded row index "<< i <<": "<< rs_row.access(i)
             //     <<" address: "<< rs_address.access(i) << std::endl;
             // curr_row = row_cv.access(i);
@@ -222,6 +222,14 @@ namespace pc_mat {
             // cleanup_decompressed_files(shard_folder);
         }
         return results;
+    }
+
+    void filter_matrix(std::string shard_folder, uint64_t start_row, uint64_t end_row, double filter){
+        const double MULT_CONST = (1ULL << 8) - 1;
+        uint32_t threshold = round(filter * MULT_CONST); //everything below threshold will be skipped
+        
+
+
     }
 
     // Convert query string to index (supports both numeric indices and identifiers)

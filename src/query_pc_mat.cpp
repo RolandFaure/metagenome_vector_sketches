@@ -367,6 +367,17 @@ void query_sliced_matrix(
     }
 }
 
+void filter_matrix(std::string matrix_folder, std::string db_folder, double filter){
+    auto start_total = std::chrono::high_resolution_clock::now();
+    
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll Queries completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
 
 std::string get_file_extension(std::string filename){
     size_t dot_pos = filename.find_last_of(".");
@@ -386,6 +397,7 @@ int main(int argc, char* argv[]) {
     std::string row_file, col_file;
     // string neighbor_fn = "neighbors.txt";
     uint32_t top_n = 10, batch_size = 1000;
+    double filter = 0;
     int n_threads = 1;
     vector<string> query_ids_str;
     bool read_from_stdin = false;
@@ -398,6 +410,7 @@ int main(int argc, char* argv[]) {
     bool use_query_file = false;
     bool use_query_ids = false;
     bool use_row_col_files = false;
+    bool use_filter = false;
 
     auto cli = (
         clipp::option("--matrix") & clipp::value("folder", matrix_folder),
@@ -408,7 +421,9 @@ int main(int argc, char* argv[]) {
             (
             clipp::option("--row_file").set(use_row_col_files) & clipp::value("row", row_file) &
             clipp::option("--col_file") & clipp::value("col", col_file)
-            )
+            ) |
+            (clipp::option("--filter").set(use_filter) & clipp::value("double", filter),)
+
             // | clipp::option("--stdin").set(read_from_stdin)
         ),
         clipp::option("--top") & clipp::value("int", top_n),
@@ -430,6 +445,7 @@ int main(int argc, char* argv[]) {
         cout << "  --query_ids\t Query IDs as command line arguments (numeric indices or identifiers)\n";
         cout << "  --row_file\t File containing query row IDs (one per line)\n";
         cout << "  --col_file\t File containing query col IDs (one per line)\n";
+        cout << "  --filter\t Filter values below threshold from matrix\n";
         // cout << "  --stdin          Read query IDs from standard input\n";
         cout << "  --top\t Number of top jaccard values to show [default 10]\n";
         cout << "  --batch_size\t Number of queries to process per batch [default 1000]\n";
@@ -447,8 +463,8 @@ int main(int argc, char* argv[]) {
     if (matrix_folder.empty()) {
         show_error_and_exit("Error: matrix folder is required.");
     }
-    if(!use_query_file && !use_query_ids && !use_row_col_files){
-        show_error_and_exit("No query files given.");
+    if(!use_query_file && !use_query_ids && !use_row_col_files && !use_filter){
+        show_error_and_exit("No specific action is given.");
     }
 
     if (!fs::exists(matrix_folder)) {
@@ -503,6 +519,9 @@ int main(int argc, char* argv[]) {
         }
 
         query_sliced_matrix(matrix_folder, db_folder, row_file, col_file, write_to_file, out_fn, batch_size, print_to_screen, sep, file_extension, n_threads);
+    }
+    else if(use_filter){
+        filter_matrix(matrix_folder, db_folder, filter);
     }
     else{
         std::cerr<<"No query types specified. Aborting...\n";
