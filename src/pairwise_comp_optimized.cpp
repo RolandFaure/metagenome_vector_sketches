@@ -65,9 +65,6 @@ SparseResult compute_sparse_dot_products_optimized(
     
     SparseResult result;
     
-    // #pragma omp parallel
-    // {
-    // Thread-local storage
     vector<int> local_rows, local_cols;
     vector<int64_t> local_values;
     local_rows.reserve(1000);
@@ -87,556 +84,56 @@ SparseResult compute_sparse_dot_products_optimized(
             }
         }
     }
-
-
-        // Combine results from all threads
-        // #pragma omp critical
-        // {
     result.rows.insert(result.rows.end(), local_rows.begin(), local_rows.end());
     result.cols.insert(result.cols.end(), local_cols.begin(), local_cols.end());
     result.values.insert(result.values.end(), local_values.begin(), local_values.end());
-        // }
-    // }
-    
     return result;
 }
 
-/*
-// Compute squared norms efficiently
-VectorXd compute_norms_squared(const MatrixXll& matrix) {
-    VectorXd norms(matrix.cols());
-    
-    #pragma omp parallel for
-    for (int i = 0; i < matrix.cols(); ++i) {
-
-        const int64_t* row_i = &matrix(0, i);
-        
-        uint64_t norm_sq = 0;
-        int k = 0;
-        // Process in chunks of 4 for better vectorization
-        for (; k <= matrix.rows() - 4; k += 4) {
-            norm_sq += row_i[k] * row_i[k];
-            norm_sq += row_i[k+1] * row_i[k+1];
-            norm_sq += row_i[k+2] * row_i[k+2];
-            norm_sq += row_i[k+3] * row_i[k+3];
-        }
-        
-        // Handle remaining elements
-        for (; k < matrix.rows(); ++k) {
-            norm_sq += row_i[k] * row_i[k];
-        }
-
-        norms(i) = static_cast<double>(norm_sq);
-    }
-    
-    return norms;
-}
-*/
-
-// Write sparse results to file (simple format)
-void write_sparse_results_prev(const string& folder, 
-                         const vector<tuple<int, int, int64_t>>& results,
-                         int dimension) {
-
-    // Remove existing output folder if it exists, then create it
-    if (!fs::exists(folder)) {
-        fs::create_directories(folder);
-    }
-
-    unordered_map<int, std::pair<vector<int>,vector<int64_t>>> reorganized_results;
-    for (const auto& [row, col, value] : results) {
-        reorganized_results[row].first.push_back(col);
-        reorganized_results[row].second.push_back(value);
-    }
-
-    // Write binary output: int32, vector<int32>, vector<int32>(number_of_cols, vector:diff_of_cols_with_previous_col, vector:values/2048)
-    string bin_filename = folder + "matrix.bin";
-    ofstream bin_out(bin_filename, ios::binary);
-
-    // File to store the position of the first byte for each row
-    string index_filename = folder + "row_index.txt";
-    ofstream index_out(index_filename);
-
-    // Map from row to first byte position in the binary file
-    int64_t current_pos = 0;
-
-    // Write each row's results in the new format, iterating only over rows present in reorganized_results
-    for (const auto& [row, pair] : reorganized_results) {
-        //NOTE: Assumes #genomes can be read in int32_t
-        const vector<int32_t>& cols = pair.first;
-        const vector<int64_t>& vals = pair.second;
-
-        // Record the first position for this row
-        index_out << row << " " << current_pos <<std::endl;
-        // std::cout<<row<<" col size: "<<cols.size()<<" val size: "<<vals.size()<< endl;
-
-        // Write column indices as differences (deltas) from previous col
-        // int32_t prev_col = 0;
-        int32_t prev_col = cols[0];
-        bin_out.write(reinterpret_cast<const char*>(&prev_col), sizeof(int32_t));
-        current_pos += sizeof(int32_t);
-        for (size_t k = 1; k < cols.size(); ++k) {
-            int32_t delta_col = cols[k] - prev_col;
-            prev_col = cols[k];
-            bin_out.write(reinterpret_cast<const char*>(&delta_col), sizeof(int32_t));
-            current_pos += sizeof(int32_t);
-        }
-        
-        // Write values (divided by 2048)
-        for (size_t k = 0; k < vals.size(); ++k) {
-            int32_t val32 = static_cast<int32_t>(round(static_cast<double>(vals[k]) / dimension));
-            bin_out.write(reinterpret_cast<const char*>(&val32), sizeof(int32_t));
-            current_pos += sizeof(int32_t);
-        }
-    }
-
-    // Compress the output files using zstd and remove the originals
-    string cmd1 = "zstd -f " + bin_filename + " && rm -f " + bin_filename;
-    string cmd2 = "zstd -f " + index_filename + " && rm -f " + index_filename;
-    system(cmd1.c_str());
-    system(cmd2.c_str());
-}
-
-void write_sparse_results(const string& folder, 
-                         const vector<tuple<int, int, int64_t>>& results,
-                         int dimension) {
-
-    // Remove existing output folder if it exists, then create it
-    if (!fs::exists(folder)) {
-        fs::create_directories(folder);
-    }
-
-    unordered_map<int, std::pair<vector<int>,vector<uint32_t>>> reorganized_results;
-    for (const auto& [row, col, value] : results) {
-        reorganized_results[row].first.push_back(col);
-        reorganized_results[row].second.push_back(value);
-    }
-
-    // Write binary output: int32, vector<int32>, vector<int32>(number_of_cols, vector:diff_of_cols_with_previous_col, vector:values/2048)
-    string bin_filename = folder + "matrix.bin";
-    ofstream bin_out(bin_filename, ios::binary);
-
-    // File to store the position of the first byte for each row
-    // string index_filename = folder + "row_index.txt";
-    string index_filename = folder + "row_index.bin";
-    ofstream index_out(index_filename, ios::binary);
-
-    // Map from row to first byte position in the binary file
-    int64_t current_pos = 0;
-
-    auto get_dot_products_vec = [&](const vector<uint32_t>& vals) {
-        vector<uint32_t> dot_products_vec(vals.size());
-        for (size_t k = 0; k < vals.size(); ++k) {
-            dot_products_vec[k] = static_cast<uint32_t>(round(static_cast<double>(vals[k]) / dimension));
-        }
-        return dot_products_vec;
-    };
-
-    std::vector<int32_t> row_vec(reorganized_results.size());
-    std::vector<int64_t> curr_pos_vec(reorganized_results.size());
-
-    // Write each row's results in the new format, iterating only over rows present in reorganized_results
-    int indx = 0;
-    for (const auto& [row, pair] : reorganized_results) {
-        //NOTE: Assumes #genomes can be read in int32_t
-        const vector<int32_t>& cols = pair.first;
-        const vector<uint32_t>& vals = pair.second;
-
-        // Record the first position for this row
-        // essentials::save_pod(index_out, row);
-        // essentials::save_pod(index_out, current_pos);
-        row_vec[indx] = row;
-        curr_pos_vec[indx++] = current_pos;
-
-        // std::cout<<indx<<": Writing row: "<< row <<" at pos: "<< current_pos << std::endl;
-        
-        bits::elias_fano<> ef;
-        ef.encode(cols.begin(), cols.size(), cols.back()+1);
-        ef.save(bin_out);
-        current_pos += ef.num_bytes();
-
-        // std::cout<<"ef bytes: "<< ef.num_bytes() << std::endl;
-        // std::cout<<"col size: "<<cols.size()<<" val size: "<<vals.size()<<std::endl;
-
-        vector<uint32_t> dot_products_vec = get_dot_products_vec(vals);
-        bits::compact_vector cv;
-        cv.build(dot_products_vec.begin(), dot_products_vec.size());
-        cv.save(bin_out);
-        current_pos += cv.num_bytes();
-        // std::cout<<" cv bytes: "<< cv.num_bytes() << std::endl;
-    }
-    bin_out.close();
-    bits::compact_vector cv_rows;
-    cv_rows.build(row_vec.begin(), row_vec.size());
-    cv_rows.save(index_out);
-    bits::compact_vector cv_pos;
-    cv_pos.build(curr_pos_vec.begin(), curr_pos_vec.size());
-    cv_pos.save(index_out);
-    index_out.close();
-    
-
-    // Compress the output files using zstd and remove the originals
-    string cmd1 = "zstd -f " + bin_filename + " && rm -f " + bin_filename;
-    string cmd2 = "zstd -f " + index_filename + " && rm -f " + index_filename;
-    system(cmd1.c_str());
-    system(cmd2.c_str());
-}
-
-void write_sparse_results_rice(const string& folder, 
-                         const vector<tuple<int, int, int64_t>>& results,
-                         int dimension) {
-
-    // Remove existing output folder if it exists, then create it
-    if (!fs::exists(folder)) {
-        fs::create_directories(folder);
-    }
-
-    unordered_map<int, std::pair<vector<int>,vector<uint32_t>>> reorganized_results;
-    for (const auto& [row, col, value] : results) {
-        reorganized_results[row].first.push_back(col);
-        reorganized_results[row].second.push_back(value);
-    }
-
-    // Write binary output: int32, vector<int32>, vector<int32>(number_of_cols, vector:diff_of_cols_with_previous_col, vector:values/2048)
-    string bin_filename = folder + "matrix.bin";
-    ofstream bin_out(bin_filename, ios::binary);
-
-    // File to store the position of the first byte for each row
-    // string index_filename = folder + "row_index.txt";
-    string index_filename = folder + "row_index.bin";
-    ofstream index_out(index_filename, ios::binary);
-
-    // Map from row to first byte position in the binary file
-    int64_t current_pos = 0;
-
-    auto get_dot_products_vec = [&](const vector<uint32_t>& vals) {
-        vector<uint32_t> dot_products_vec(vals.size());
-        for (size_t k = 0; k < vals.size(); ++k) {
-            dot_products_vec[k] = static_cast<uint32_t>(round(static_cast<double>(vals[k]) / dimension));
-        }
-        return dot_products_vec;
-    };
-
-    std::vector<uint32_t> row_vec(reorganized_results.size());
-    std::vector<uint64_t> curr_pos_vec(reorganized_results.size());
-    std::vector<uint32_t> start_neighbor(reorganized_results.size());
-
-    // std::ofstream temp_out("rice_space.txt");
-    // Write each row's results in the new format, iterating only over rows present in reorganized_results
-    int indx = 0;
-    uint64_t jac_space = 0, ngh_space = 0;
-    for (const auto& [row, pair] : reorganized_results) {
-        //NOTE: Assumes #genomes can be read in int32_t
-        const vector<int32_t>& cols = pair.first;
-        const vector<uint32_t>& vals = pair.second;
-
-        // Record the first position for this row
-        // essentials::save_pod(index_out, row);
-        // essentials::save_pod(index_out, current_pos);
-        row_vec[indx] = row;
-        curr_pos_vec[indx] = static_cast<uint64_t>(bin_out.tellp());
-        // std::streampos bin_out_pos = 
-        // assert(current_pos == bin_out_pos);
-        // std::cout<<"i: "<< indx <<" row: "<< row <<" at pos: "<< current_pos << std::endl;
-
-        // std::cout<<indx<<": Writing row: "<< row <<" at pos: "<< current_pos << std::endl;
-        
-        start_neighbor[indx++] = cols[0];
-        std::vector<uint32_t> delta_cols(cols.size()-1);
-        for (size_t k = 1; k < cols.size(); ++k) {
-            assert(cols[k] > cols[k-1]);
-            delta_cols[k-1] = cols[k] - cols[k-1];
-        }
-
-        bits::rice_sequence<> rs;
-        rs.encode(delta_cols.begin(), delta_cols.size());
-        rs.save(bin_out);
-        current_pos += rs.num_bytes();
-
-        // bits::elias_fano<> ef;
-        // ef.encode(cols.begin(), cols.size(), cols.back()+1);
-        // ef.save(bin_out);
-        // current_pos += ef.num_bytes();
-
-        // std::cout<<"ef bytes: "<< ef.num_bytes() << std::endl;
-        // std::cout<<"col size: "<<cols.size()<<" val size: "<<vals.size()<<std::endl;
-        // CHECK: dot products are set as 32 bit integers
-        vector<uint32_t> dot_products_vec = get_dot_products_vec(vals);
-        bits::rice_sequence<> rs_dp;
-        rs_dp.encode(dot_products_vec.begin(), dot_products_vec.size());
-        rs_dp.save(bin_out);
-        current_pos += rs_dp.num_bytes();
-
-        // bits::compact_vector cv;
-        // cv.build(dot_products_vec.begin(), dot_products_vec.size());
-        // cv.save(bin_out);
-        // current_pos += cv.num_bytes();
-        // std::cout<<" cv bytes: "<< cv.num_bytes() << std::endl;
-        // temp_out<<row<<" "<<dot_products_vec.size()<<" "<<rs_dp.num_bytes()<<" "<<rs.num_bytes()<<std::endl;
-        ngh_space += rs.num_bytes();
-        jac_space += rs_dp.num_bytes();
-    }
-    bin_out.close();
-    bits::rice_sequence<> rs_rows;
-    rs_rows.encode(row_vec.begin(), row_vec.size());
-    rs_rows.save(index_out);
-
-    bits::rice_sequence<> rs_pos;
-    rs_pos.encode(curr_pos_vec.begin(), curr_pos_vec.size());
-    rs_pos.save(index_out);
-    index_out.close();
-
-    std::string neighbor_fn = folder + "neighbor_start.bin";
-    std::ofstream ngh_out(neighbor_fn, std::ios::binary);
-
-    bits::rice_sequence<> rs_start;
-    // for(int i=0; i<start_neighbor.size(); i++){
-    //     std::cout<<"Neighbor start for row "<< i <<": "<< start_neighbor[i] << std::endl;
-    // }
-    rs_start.encode(start_neighbor.begin(), start_neighbor.size());
-    rs_start.save(ngh_out);
-    ngh_out.close();
-    ngh_space += rs_start.num_bytes();
-
-    std::cout<<"Jac space: "<<jac_space<<" ngh space: "<<ngh_space<<std::endl;
-
-
-    // bits::compact_vector cv_rows;
-    // cv_rows.build(row_vec.begin(), row_vec.size());
-    // cv_rows.save(index_out);
-    // bits::compact_vector cv_pos;
-    // cv_pos.build(curr_pos_vec.begin(), curr_pos_vec.size());
-    // cv_pos.save(index_out);
-    // index_out.close();
-    
-
-    // Compress the output files using zstd and remove the originals
-    string cmd1 = "zstd -f " + bin_filename + " && rm -f " + bin_filename;
-    string cmd2 = "zstd -f " + index_filename + " && rm -f " + index_filename;
-    string cmd3 = "zstd -f " + neighbor_fn + " && rm -f " + neighbor_fn;
-    system(cmd1.c_str());
-    system(cmd2.c_str());
-    system(cmd3.c_str());
-}
-
-
-void write_sparse_results_jaccard(const string& folder, 
+void write_matrix(const string& folder, 
                          const vector<tuple<int, int, int64_t>>& results,
                          const vector<double>& all_norms_vec,
-                         int dimension) {
-
-    // Remove existing output folder if it exists, then create it
-    if (!fs::exists(folder)) {
-        fs::create_directories(folder);
-    }
-    const double MULT_CONST = (1ULL << 16) - 1;
-    // unordered_map<int, std::pair<vector<int>,vector<uint32_t>>> reorganized_results;
-    unordered_map<uint32_t, std::vector<std::pair<uint32_t, uint16_t> > >reorganized_results;
-    
-    for (const auto& [row, col, value] : results) {
-        if(row == col) continue;
-        double norm_curr = all_norms_vec[row];
-        double norm_col = all_norms_vec[col];
-        double inter_col = static_cast<double>(value)/dimension;
-        double jaccard = inter_col / (norm_curr + norm_col - inter_col);
-        // if(row == 32 || row == 12){
-        //     std::cout<<"is: "<<inter_col<<" ns: "<<norm_curr<<" nn: "<<norm_col<<" jac: "<<jaccard<<std::endl;
-        // }
-        if(jaccard > 1) jaccard = 1;
-        uint16_t quantized_jaccard = static_cast<uint16_t>(round(jaccard * MULT_CONST));
-        reorganized_results[row].push_back(std::make_pair(col, quantized_jaccard));
-    }
-
-    // Write binary output: int32, vector<int32>, vector<int32>(number_of_cols, vector:diff_of_cols_with_previous_col, vector:values/2048)
-    string bin_filename = folder + "matrix.bin";
-    ofstream bin_out(bin_filename, ios::binary);
-
-    // File to store the position of the first byte for each row
-    string index_filename = folder + "row_index.bin";
-    ofstream index_out(index_filename, ios::binary);
-
-    // Map from row to first byte position in the binary file
-    uint64_t current_pos = 0;
-    std::vector<uint32_t> row_vec(reorganized_results.size());
-    std::vector<uint64_t> curr_pos_vec(reorganized_results.size());
-    std::vector<uint64_t> bytes_written_vec(reorganized_results.size());
-
-    
-    // std::ofstream temp_out("space_usage.txt");
-    uint64_t jac_space = 0, ngh_space = 0;
-    // Write each row's results in the new format, iterating only over rows present in reorganized_results
-    int indx = 0;
-    // neighbor_pair_vec<neighbor_index, jaccard_btwn_me_&_neighbor>
-    for (auto& [row, neighbor_pair_vec] : reorganized_results) {
-        sort(neighbor_pair_vec.begin(), neighbor_pair_vec.end(),[] (const std::pair<uint32_t, uint16_t>& a, const std::pair<uint32_t, uint16_t>& b) {
-            return a.second > b.second;
-        });
-
-        std::vector<uint32_t> neighbor_indx_vec;
-        std::vector<uint16_t> neighbor_jaccard_vec;
-        neighbor_indx_vec.reserve(neighbor_pair_vec.size());
-        neighbor_jaccard_vec.reserve(neighbor_pair_vec.size());
-
-         for (auto& [idx, j] : neighbor_pair_vec) {
-            neighbor_indx_vec.push_back(idx);
-            neighbor_jaccard_vec.push_back(j);
-        }
-
-        // for(size_t i=0; i<neighbor_pair_vec.size(); i++){
-        //     neighbor_indx_vec[i] = neighbor_pair_vec[i].first;
-        //     neighbor_jaccard_vec[i] = neighbor_pair_vec[i].second;
-        //     // if(neighbor_pair_vec[i].second >= 1) neighbor_jaccard_vec[i] = static_cast<uint16_t>(MULT_CONST);
-        //     // else neighbor_jaccard_vec[i] = static_cast<uint16_t>(round(neighbor_pair_vec[i].second * MULT_CONST));
-        //     // if(row == 5722){
-        //     //     std::cout<<i<<" "<<neighbor_pair_vec[i].second<<" "<<neighbor_jaccard_vec[i]<<std::endl;
-        //     // }
-        // }
-
-        // Record this row index and its stored position 
-        uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
-        row_vec[indx] = row;
-        curr_pos_vec[indx] = current_pos;
-
-        // std::cout<<"i: "<< indx <<" row: "<< row <<" at pos: "<< current_pos << std::endl;
-
-        // std::cout<<indx<<": Writing row: "<< row <<" at pos: "<< current_pos << std::endl;
-
-        std::vector<uint16_t> ngh_jcrd_delta_vec(neighbor_jaccard_vec.size()-1);
-        uint16_t top_jaccard = neighbor_jaccard_vec[0];
-        for(size_t i=1; i < neighbor_jaccard_vec.size(); i++){
-            // as sorted in descending order
-            if(neighbor_jaccard_vec[i-1] < neighbor_jaccard_vec[i]){
-                std::cout<<i<<" "<<row<<" "<<neighbor_jaccard_vec[i-1] <<" "<< neighbor_jaccard_vec[i]<<std::endl;
-            }
-            assert(neighbor_jaccard_vec[i-1] >= neighbor_jaccard_vec[i]);
-            ngh_jcrd_delta_vec[i-1] = neighbor_jaccard_vec[i-1] - neighbor_jaccard_vec[i];
-        }
-        // std::cout<<"indx: "<<indx<<" row: "<<row<<" ca: "<<current_pos
-        //     <<" tj: "<<top_jaccard<<" so: "<<sizeof(top_jaccard)
-        //     <<std::endl;
-        bin_out.write(reinterpret_cast<const char*>(&top_jaccard), sizeof(top_jaccard));
-        // bin_out.flush();
-        // current_pos += sizeof(top_jaccard);
-        // std::cout<<"ca: "<<current_pos<<std::endl;
-        bits::rice_sequence<> delta_jaccard_rs;
-        delta_jaccard_rs.encode(ngh_jcrd_delta_vec.begin(), ngh_jcrd_delta_vec.size());
-        delta_jaccard_rs.save(bin_out);
-        // current_pos += delta_jaccard_rs.num_bytes();
-        // std::cout<<"ca: "<<current_pos<<std::endl;
-
-        // bits::rice_sequence<> ngh_rs;
-        // ngh_rs.encode(neighbor_indx_vec.begin(), neighbor_indx_vec.size());
-        // ngh_rs.save(bin_out);
-
-        bits::compact_vector cv_ngh;
-        cv_ngh.build(neighbor_indx_vec.begin(), neighbor_indx_vec.size());
-        cv_ngh.save(bin_out);
-
-        // std::vector<uint8_t> encoded_ngh_indx_vec(streamvbyte_max_compressedbytes(neighbor_indx_vec.size()));
-        // uint64_t bytes_written = streamvbyte_encode(neighbor_indx_vec.data(), neighbor_indx_vec.size(), 
-        //             encoded_ngh_indx_vec.data());
-        // bytes_written_vec[indx++] = bytes_written;
-        // bin_out.write(reinterpret_cast<const char*>(encoded_ngh_indx_vec.data()), bytes_written);  
-        // temp_out<<row<<" "<<neighbor_indx_vec.size()<<" "<<delta_jaccard_rs.num_bytes()<<" "<<bytes_written<<" "<<std::endl;
-        
-        
-        jac_space += delta_jaccard_rs.num_bytes() + sizeof(top_jaccard);
-        // ngh_space += bytes_written;
-        // ngh_space += ngh_rs.num_bytes();
-        ngh_space += cv_ngh.num_bytes();
-        
-    }
-    bin_out.flush();     
-    bin_out.close();
-    
-
-    // temp_out.close();
-
-    bits::compact_vector cv_rows;
-    cv_rows.build(row_vec.begin(), row_vec.size());
-    cv_rows.save(index_out);
-
-    // curr_pos_vec is sorted
-    std::vector<uint64_t> curr_pos_delta_vec(curr_pos_vec.size()-1);
-    // curr_pos_vec[0] is always 0;
-    for(size_t i=1; i<curr_pos_vec.size(); i++){
-        curr_pos_delta_vec[i-1] = curr_pos_vec[i] - curr_pos_vec[i-1];
-    }
-
-    bits::compact_vector cv_cps; // Compact Vector Current PositionS
-    cv_cps.build(curr_pos_delta_vec.begin(), curr_pos_delta_vec.size());
-    cv_cps.save(index_out);
-    index_out.close();
-
-    // std::string vbyte_fn = folder + "vbyte.bin";
-    // std::ofstream vbyte_out(vbyte_fn, std::ios::binary);
-    // bits::compact_vector cv_vb; // Compact Vector Variable Byte written
-    // cv_vb.build(bytes_written_vec.begin(), bytes_written_vec.size());
-    // cv_vb.save(vbyte_out);
-    // vbyte_out.close();
-    // ngh_space += cv_vb.num_bytes();
-    std::cout<<"Jac space: "<<jac_space<<" ngh space: "<<ngh_space<<std::endl;
-
-    // Compress the output files using zstd and remove the originals
-    string cmd1 = "zstd -f " + bin_filename + " && rm -f " + bin_filename;
-    string cmd2 = "zstd -f " + index_filename + " && rm -f " + index_filename;
-    // string cmd3 = "zstd -f " + vbyte_fn + " && rm -f " + vbyte_fn;
-    system(cmd1.c_str());
-    system(cmd2.c_str());
-    // system(cmd3.c_str());
-}
-
-void write_sparse_results_jaccard_wo_sort(const string& folder, 
-                         const vector<tuple<int, int, int64_t>>& results,
-                         const vector<double>& all_norms_vec,
-                         int dimension) {
+                         int dimension,
+                        uint64_t begin_row, uint64_t end_row) {
 
     // Remove existing output folder if it exists, then create it
     if (!fs::exists(folder)) {
         fs::create_directories(folder);
     }
     const double MULT_CONST = (1ULL << 8) - 1;
-    // unordered_map<int, std::pair<vector<int>,vector<uint32_t>>> reorganized_results;
+    // Contains for each accession, its neighbor and corresponding Jaccard
     unordered_map<uint32_t, std::vector<std::pair<uint32_t, uint16_t> > >reorganized_results;
-    // std::ofstream jac_os("jaccards.txt");
     for (const auto& [row, col, value] : results) {
-        // if(row == col) continue;
         double norm_curr = all_norms_vec[row];
         double norm_col = all_norms_vec[col];
         double inter_col = static_cast<double>(value)/dimension;
         double jaccard = inter_col / (norm_curr + norm_col - inter_col);
         if(jaccard > 1) jaccard = 1;
         uint16_t quantized_jaccard = static_cast<uint16_t>(round(jaccard * MULT_CONST));
-        // if(row == 9599){
-        //     jac_os<<"is: "<<inter_col<<" ns: "<<norm_curr<<" nn: "<<norm_col
-        //         <<" jac: "<<jaccard<<" qj: "<<quantized_jaccard
-        //         <<std::endl;
-        // }
         reorganized_results[row].push_back(std::make_pair(col, quantized_jaccard));
     }
 
     // Write binary output: int32, vector<int32>, vector<int32>(number_of_cols, vector:diff_of_cols_with_previous_col, vector:values/2048)
-    string bin_filename = folder + "matrix.bin";
+    string bin_filename = folder + "/matrix.bin";
     ofstream bin_out(bin_filename, ios::binary);
 
-    // File to store the position of the first byte for each row
-    string index_filename = folder + "row_index.bin";
+    // File to store the position of the first byte for each row (offset array)
+    string index_filename = folder + "/row_index.bin";
     ofstream index_out(index_filename, ios::binary);
 
-    // Map from row to first byte position in the binary file
-    // uint64_t current_pos = 0;
-    std::vector<uint32_t> row_vec(reorganized_results.size());
+    // std::vector<uint32_t> row_vec(reorganized_results.size());
     std::vector<uint64_t> curr_pos_vec(reorganized_results.size());
     std::vector<uint32_t> start_neighbor(reorganized_results.size());
-    // std::vector<uint64_t> bytes_written_vec(reorganized_results.size());
 
     
     // std::ofstream temp_out("space_usage.txt");
-    uint64_t jac_space = 0, ngh_space = 0;
+    // uint64_t jac_space = 0, ngh_space = 0;
     // Write each row's results in the new format, iterating only over rows present in reorganized_results
     int indx = 0;
     // neighbor_pair_vec<neighbor_index, jaccard_btwn_me_&_neighbor>
-    for (auto& [row, neighbor_pair_vec] : reorganized_results) {
+    // for (auto& [row, neighbor_pair_vec] : reorganized_results) {
+    for (uint64_t row=begin_row; row<end_row; row++){
+        auto neighbor_pair_vec = reorganized_results[row];
         // sort(neighbor_pair_vec.begin(), neighbor_pair_vec.end(),[] (const std::pair<uint32_t, uint16_t>& a, const std::pair<uint32_t, uint16_t>& b) {
         //     return a.second > b.second;
         // });
@@ -656,9 +153,11 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         
         // FIXME: The row values should be just consecutive values [everyone has at least one neighbor (self)], hence do not need to store these
         // the first row value can be calculated from the shard value
-        row_vec[indx] = row; 
+
+        // row_vec[indx] = row; 
+        std::cout<<"Row: "<<row<<std::endl;
+
         curr_pos_vec[indx] = current_pos;
-    
         start_neighbor[indx++] = neighbor_indx_vec[0];
         
         std::vector<uint64_t> delta_cols(neighbor_indx_vec.size()-1);
@@ -671,8 +170,6 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         cv_jc.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
         cv_jc.save(bin_out);
         
-        jac_space += cv_jc.num_bytes();
-        
         assert(neighbor_jaccard_vec.size() >= 1);
         
         if(neighbor_jaccard_vec.size() == 1) continue;
@@ -680,35 +177,13 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
         bits::rice_sequence<> rs_delta;
         rs_delta.encode(delta_cols.begin(), delta_cols.size());
         rs_delta.save(bin_out);
-
-        // if(row == 9599){
-        //     std::cout<<row<<" "<<current_pos
-        //         <<" "<<rs_delta.size()+1<<" "<<neighbor_indx_vec.size()<<" "<< neighbor_indx_vec[0]
-        //     <<std::endl;
-        // }
-
-        // bits::rice_sequence<> rs_jac;
-        // rs_jac.encode(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
-        // rs_jac.save(bin_out);
-
-        
-        // jac_space += rs_jac.num_bytes();
-        // ngh_space += bytes_written;
-        // ngh_space += ngh_rs.num_bytes();
-        // ngh_space += rs_delta.num_bytes();
-        // ngh_space += cv_delta.num_bytes();
-        // ngh_space += bytes_written;
-        
     }
     bin_out.flush();     
     bin_out.close();
     
-
-    // temp_out.close();
-
-    bits::compact_vector cv_rows;
-    cv_rows.build(row_vec.begin(), row_vec.size());
-    cv_rows.save(index_out);
+    // bits::compact_vector cv_rows;
+    // cv_rows.build(row_vec.begin(), row_vec.size());
+    // cv_rows.save(index_out);
 
     // curr_pos_vec is sorted
     std::vector<uint64_t> curr_pos_delta_vec(curr_pos_vec.size()-1);
@@ -724,36 +199,10 @@ void write_sparse_results_jaccard_wo_sort(const string& folder,
 
     std::string neighbor_fn = folder + "neighbor_start.bin";
     std::ofstream ngh_out(neighbor_fn, std::ios::binary);
-    bits::rice_sequence<> rs_start; // FIXME: Rice encoding should not be the best possible options. The values will be widely distributed
+    bits::rice_sequence<> rs_start; 
     rs_start.encode(start_neighbor.begin(), start_neighbor.size());
     rs_start.save(ngh_out);
     ngh_out.close();
-    // ngh_space += rs_start.num_bytes();
-
-    // std::string vbyte_fn = folder + "vbyte.bin";
-    // std::ofstream vbyte_out(vbyte_fn, std::ios::binary);
-    // bits::compact_vector cv_vb; // Compact Vector Variable Byte written
-    // cv_vb.build(bytes_written_vec.begin(), bytes_written_vec.size());
-    // cv_vb.save(vbyte_out);
-    // vbyte_out.close();
-    // ngh_space += cv_vb.num_bytes();
-
-    // std::string vbyte_fn = folder + "vbyte.bin";
-    // std::ofstream vbyte_out(vbyte_fn, std::ios::binary);
-    // bits::compact_vector cv_vb; // Compact Vector Variable Byte written
-    // cv_vb.build(bytes_written_vec.begin(), bytes_written_vec.size());
-    // cv_vb.save(vbyte_out);
-    // vbyte_out.close();
-    // ngh_space += cv_vb.num_bytes();
-    // std::cout<<"Jac space: "<<jac_space<<" ngh space: "<<ngh_space<<std::endl;
-
-    // Compress the output files using zstd and remove the originals
-    // string cmd1 = "zstd -f " + bin_filename + " && rm -f " + bin_filename;
-    // string cmd2 = "zstd -f " + index_filename + " && rm -f " + index_filename;
-    // string cmd3 = "zstd -f " + neighbor_fn + " && rm -f " + neighbor_fn;
-    // system(cmd1.c_str());
-    // system(cmd2.c_str());
-    // system(cmd3.c_str());
 }
 
 
@@ -888,7 +337,7 @@ int main(int argc, char* argv[]) {
         // begin_row = 1372094;
         // end_row = begin_row + 2;
 
-        cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row << endl;
+        cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row-1 << endl;
 
         vector<tuple<int, int, int64_t>> all_results;
 
@@ -926,7 +375,7 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
-        write_sparse_results_jaccard_wo_sort(shard_folder, all_results, all_norms ,dimension);
+        write_matrix(shard_folder, all_results, all_norms, dimension, begin_row, end_row);
         
         auto end_time = chrono::high_resolution_clock::now();
         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);

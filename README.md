@@ -136,7 +136,7 @@ Important Output Format Note:
     Regular Query: Output file must be *.csv, *.tsv, or *.txt.
 ```
 
-### Python Interface for Matrix Search
+<!-- ### Python Interface for Matrix Search
 
 The `read_pc_mat.py` script provides a Python interface for searching the pairwise comparison matrix.
 
@@ -165,4 +165,4 @@ python3 ../src/read_pc_mat.py --matrix toy_index --db toy_db/ --query_file query
 
 ```Shell
 python3 ../src/read_pc_mat.py --matrix toy_index --db toy_db/ --row_file row_file.txt --col_file col_file.txt
-```
+``` -->

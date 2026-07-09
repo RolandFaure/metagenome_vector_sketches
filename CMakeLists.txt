@@ -5,7 +5,7 @@ project(DotHash LANGUAGES CXX)
 # set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -ffast-math")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -ffast-math -DNDEBUG")
 set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS}")
 
 # ==== OpenMP ====
