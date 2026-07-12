@@ -41,8 +41,8 @@ namespace pc_mat {
         return id_to_index;
     }
 
-    void load_vector_norms(const string& matrix_folder, vector<float>& norms){
-        string norms_file = matrix_folder + "/vector_norms.txt";
+    void load_vector_norms(const string& db_folder, vector<float>& norms){
+        string norms_file = db_folder + "/vector_norms.txt";
         ifstream norms_in(norms_file);
         if (!norms_in) {
             cerr << "Error: Could not open " << norms_file << endl;
@@ -63,8 +63,8 @@ namespace pc_mat {
     }
 
     // Get the total number of vectors from vector_norms.txt
-    int get_total_vectors(const string& matrix_folder) {
-        string norms_file = matrix_folder + "/vector_norms.txt";
+    int get_total_vectors(const string& db_folder) {
+        string norms_file = db_folder + "/vector_norms.txt";
         ifstream norms_in(norms_file);
         if (!norms_in) {
             cerr << "Error: Could not open " << norms_file << endl;
@@ -107,7 +107,8 @@ namespace pc_mat {
 
     
     std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>> get_shard_row_to_address_map(const string& shard_folder, 
-            uint64_t total_vectors, int shard_idx, int num_shards) {
+            uint64_t start_row){
+            // uint64_t total_vectors, int shard_idx, int num_shards) {
         std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t> > row_to_address_map;
         
         string index_filename = shard_folder + "/row_index.bin";
@@ -122,9 +123,10 @@ namespace pc_mat {
         // row_cv.load(index_file);
         delta_address_cv.load(index_file);
 
-        uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
-        uint64_t curr_row = shard_idx * rows_per_shard;
-        uint64_t end_row = min(curr_row + rows_per_shard, total_vectors);
+        // uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+        // uint64_t curr_row = shard_idx * rows_per_shard;
+        // uint64_t end_row = min(curr_row + rows_per_shard, total_vectors);
+        uint64_t curr_row = start_row;
 
         // first position is always 0, rest are delta coded
 
@@ -168,9 +170,11 @@ namespace pc_mat {
             // std::cout<<"shard: "<<shard_idx<<std::endl;
             
             std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
-            // decompress_zstd_files(shard_folder);
+            uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+            uint64_t start_row = shard_idx * rows_per_shard;
+            // uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
             const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
-                total_vectors, shard_idx, num_shards);
+                start_row);
             assert(!row_to_indx_add_map.empty());
             
             std::string bin_fn = shard_folder + "/matrix.bin";
@@ -224,12 +228,104 @@ namespace pc_mat {
         return results;
     }
 
-    void filter_matrix(std::string shard_folder, uint64_t start_row, uint64_t end_row, double filter){
+    void filter_matrix_for_shard(std::string shard_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, double filter){
         const double MULT_CONST = (1ULL << 8) - 1;
-        uint32_t threshold = round(filter * MULT_CONST); //everything below threshold will be skipped
+        uint32_t threshold = round(filter * MULT_CONST); //everything below and equal to threshold will be skipped
         
+        const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
+                start_row);
+        
+        std::string bin_fn = shard_folder + "/matrix.bin";
+        std::ifstream bin_in(bin_fn, std::ios::binary);
 
+        std::string bin_out_fn = new_shard_folder + "/matrix.bin";
+        std::ofstream bin_out(bin_out_fn, std::ios::binary);
 
+        std::string ngh_fn = shard_folder + "/neighbor_start.bin";
+        std::ifstream ngh_in(ngh_fn, std::ios::binary);
+        
+        std::string ngh_out_fn = new_shard_folder + "/neighbor_start.bin";
+        std::ofstream ngh_out(ngh_out_fn, std::ios::binary);
+
+        string index_filename = new_shard_folder + "/row_index.bin";
+        ofstream index_out(index_filename, ios::binary);
+
+        bits::rice_sequence<> rs_start;
+        rs_start.load(ngh_in);
+        ngh_in.close();
+
+        std::vector<uint64_t> curr_pos_vec;
+        std::vector<uint32_t> start_neighbor;
+        curr_pos_vec.reserve(end_row - start_row + 1);
+        
+        for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+            auto indx_addr = row_to_indx_add_map.at(row); // do not need this
+            auto curr_idx = indx_addr.first; // 0 to end_row - start_row
+            auto curr_addr = indx_addr.second;
+
+            bits::compact_vector cv_jc;
+            cv_jc.load(bin_in);
+            
+            bits::rice_sequence<> rs_delta;
+            
+            if(cv_jc.size() > 1) rs_delta.load(bin_in);
+            
+            uint64_t number_of_neighbors = cv_jc.size();
+            std::vector<uint32_t> neighbor_indx_vec;
+            std::vector<uint16_t> neighbor_jaccard_vec;
+            neighbor_indx_vec.reserve(cv_jc.size());
+            neighbor_jaccard_vec.reserve(cv_jc.size());
+
+            // this is always at least 1 because of self similarity
+            assert(cv_jc.access(0) == 255);
+
+            auto neighbor_index = rs_start.access(curr_idx);
+            neighbor_indx_vec.emplace_back(neighbor_index);
+            neighbor_jaccard_vec.emplace_back(cv_jc.access(0));
+            for(int i=1; i<number_of_neighbors; i++){
+                auto similarity = cv_jc.access(i);
+                neighbor_index +=  rs_delta.access(i-1);
+                if(similarity <= threshold) continue;
+                neighbor_indx_vec.emplace_back(neighbor_index);
+                neighbor_jaccard_vec.emplace_back(cv_jc.access(i));
+            }
+            uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
+            curr_pos_vec.emplace_back(current_pos);
+
+            std::vector<uint64_t> delta_cols(neighbor_indx_vec.size()-1);
+            for (size_t k = 1; k < neighbor_indx_vec.size(); ++k) {
+                assert(neighbor_indx_vec[k] > neighbor_indx_vec[k-1]);
+                delta_cols[k-1] = neighbor_indx_vec[k] - neighbor_indx_vec[k-1];
+            }
+
+            bits::compact_vector cv_jc_out;
+            cv_jc_out.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
+            cv_jc_out.save(bin_out);
+            
+            assert(neighbor_jaccard_vec.size() >= 1);
+            
+            if(neighbor_jaccard_vec.size() == 1) continue;
+            
+            bits::rice_sequence<> rs_delta_out;
+            rs_delta_out.encode(delta_cols.begin(), delta_cols.size());
+            rs_delta_out.save(bin_out);
+        }
+        bin_out.flush();     
+        bin_out.close();
+
+        std::vector<uint64_t> curr_pos_delta_vec(curr_pos_vec.size()-1);
+        // curr_pos_vec[0] is always 0;
+        for(size_t i=1; i<curr_pos_vec.size(); i++){
+            curr_pos_delta_vec[i-1] = curr_pos_vec[i] - curr_pos_vec[i-1];
+        }
+        bits::compact_vector cv_cps; // Compact Vector Current PositionS
+        cv_cps.build(curr_pos_delta_vec.begin(), curr_pos_delta_vec.size());
+        cv_cps.save(index_out);
+        index_out.close();
+
+        // writing the previous encoding to the new location (copying)
+        rs_start.save(ngh_out);
+        ngh_out.close();
     }
 
     // Convert query string to index (supports both numeric indices and identifiers)
@@ -383,13 +479,12 @@ namespace pc_mat {
 
         for (const auto& [shard_idx, query_index_vec] : shard_to_queries) {
             string shard_folder = matrix_folder + "/shard_" + to_string(shard_idx);
-
-            // Decompress files in this shard
-            // decompress_zstd_files(shard_folder);
-
             // Load the row index for this shard
+            uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+            uint64_t start_row = shard_idx * rows_per_shard;
+            // uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
             const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
-                total_vectors, shard_idx, num_shards);
+                start_row);
             assert(!row_to_indx_add_map.empty());
             
             

@@ -48,6 +48,8 @@ namespace pc_mat{
     // Calculate which shard contains a given row
     int get_shard_for_row(int row, int total_vectors, int num_shards) ;
 
+    void filter_matrix_for_shard(std::string shard_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, double filter);
+
     // Load row index mapping from row_index.txt in a specific shard
     vector<pair<int, int64_t>> load_shard_row_index(const string& shard_folder) ;
 

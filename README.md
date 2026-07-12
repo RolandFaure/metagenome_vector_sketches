@@ -128,6 +128,14 @@ Query a slice of the matrix (a sub-matrix) defined by IDs in a row file and a co
 ../build/query_pc_mat --matrix toy_index --db toy_db/  --row_file row_file.txt --col_file col_file.txt --write_to_file row_col.h5 --batch_size 5 --thread 2
 ```
 
+#### Filter Matrix
+
+Filter all accessions below a threshold [0, 1] and write the corresponding matrix to a new location:
+
+```Shell
+../build/query_pc_mat --matrix toy_index --db toy_db/ --filter 0.2 --out filtered_toy_index --thread 2
+```
+
 ```
 Important Output Format Note:
 

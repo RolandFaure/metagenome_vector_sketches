@@ -77,7 +77,8 @@ SparseResult compute_sparse_dot_products_optimized(
         for (int j = 0; j < dot_products.cols(); ++j) {
             double threshold = 0.05 * (norms_i(i) + norms_j(j));
             int64_t dot_product = dot_products(i, j);
-            if (static_cast<double>(dot_product) / dimension > threshold) { 
+            // if (static_cast<double>(dot_product) / dimension > threshold) { 
+            if (dot_product/ dimension > threshold) { 
                 local_rows.push_back(i);
                 local_cols.push_back(j);
                 local_values.push_back(dot_product);
@@ -155,7 +156,7 @@ void write_matrix(const string& folder,
         // the first row value can be calculated from the shard value
 
         // row_vec[indx] = row; 
-        std::cout<<"Row: "<<row<<std::endl;
+        // std::cout<<"Row: "<<row<<std::endl;
 
         curr_pos_vec[indx] = current_pos;
         start_neighbor[indx++] = neighbor_indx_vec[0];
