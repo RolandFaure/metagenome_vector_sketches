@@ -257,6 +257,7 @@ namespace pc_mat {
         std::vector<uint64_t> curr_pos_vec;
         std::vector<uint32_t> start_neighbor;
         curr_pos_vec.reserve(end_row - start_row + 1);
+        start_neighbor.reserve(rs_start.size());
         
         for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
             auto indx_addr = row_to_indx_add_map.at(row); // do not need this
@@ -280,14 +281,24 @@ namespace pc_mat {
             assert(cv_jc.access(0) == 255);
 
             auto neighbor_index = rs_start.access(curr_idx);
-            neighbor_indx_vec.emplace_back(neighbor_index);
-            neighbor_jaccard_vec.emplace_back(cv_jc.access(0));
+            auto similarity = cv_jc.access(0);
+            bool is_first_neighbor_found = false;
+            if(similarity > threshold){
+                is_first_neighbor_found = true;
+                start_neighbor.emplace_back(neighbor_index);
+                neighbor_indx_vec.emplace_back(neighbor_index);
+                neighbor_jaccard_vec.emplace_back(similarity);
+            }
+
             for(int i=1; i<number_of_neighbors; i++){
                 auto similarity = cv_jc.access(i);
                 neighbor_index +=  rs_delta.access(i-1);
                 if(similarity <= threshold) continue;
+                if(!is_first_neighbor_found){
+                    start_neighbor.emplace_back(neighbor_index);
+                }
                 neighbor_indx_vec.emplace_back(neighbor_index);
-                neighbor_jaccard_vec.emplace_back(cv_jc.access(i));
+                neighbor_jaccard_vec.emplace_back(similarity);
             }
             uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
             curr_pos_vec.emplace_back(current_pos);
@@ -323,8 +334,9 @@ namespace pc_mat {
         cv_cps.save(index_out);
         index_out.close();
 
-        // writing the previous encoding to the new location (copying)
-        rs_start.save(ngh_out);
+        bits::rice_sequence<> new_start_nei_rs; 
+        new_start_nei_rs.encode(start_neighbor.begin(), start_neighbor.size());
+        new_start_nei_rs.save(ngh_out);
         ngh_out.close();
     }
 

@@ -77,8 +77,7 @@ SparseResult compute_sparse_dot_products_optimized(
         for (int j = 0; j < dot_products.cols(); ++j) {
             double threshold = 0.05 * (norms_i(i) + norms_j(j));
             int64_t dot_product = dot_products(i, j);
-            // if (static_cast<double>(dot_product) / dimension > threshold) { 
-            if (dot_product/ dimension > threshold) { 
+            if (static_cast<double>(dot_product) / dimension > threshold) { 
                 local_rows.push_back(i);
                 local_cols.push_back(j);
                 local_values.push_back(dot_product);
@@ -228,8 +227,8 @@ int main(int argc, char* argv[]) {
         clipp::required("--output_folder") & clipp::value("folder", output_folder),
         clipp::required("--num_shards") & clipp::value("int", num_shards),
         clipp::required("--shard_idx") & clipp::value("int", shard_idx),
-        clipp::option("--start_shard") & clipp::value("int", start_shard),
-        clipp::option("--end_shard") & clipp::value("int", end_shard),
+        // clipp::option("--start_shard") & clipp::value("int", start_shard),
+        // clipp::option("--end_shard") & clipp::value("int", end_shard),
         clipp::option("--help").set(show_help)
     );
 

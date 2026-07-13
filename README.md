@@ -65,7 +65,7 @@ The `pairwise_comp_optimized` executable computes the similarity matrix between 
 To compute the matrix:
 
 ```Shell
-../build/pairwise_comp_optimized --db toy_db/ --dimension 2048 --output_folder toy_index/ --max_memory_gb 12 --num_threads 8
+../build/pairwise_comp_optimized --db toy_db/ --output_folder toy_index/ --max_memory_gb 12 --num_threads 1 --num_shards 1 --shard_idx 0
 ```
 Strategy Note: The default strategy is 0=random projections. You can use --strategy 1 for MinHashes.
 
