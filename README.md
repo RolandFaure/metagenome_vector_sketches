@@ -103,7 +103,7 @@ Options:
 
 **Note**: Batches are executed in parallel, up to the configured number of threads. Within each batch, queries are processed sequentially. The write phase for sliced queries is also performed sequentially.
 
-**To query from all accessions inside the server, use `--matrix /scratch/mgs_project/matrix_unzipped/ --db /scratch/mgs_project/db/`**
+**To query from all accessions inside the server, use `--matrix /scratch/mgs_project/matrix/ --db /scratch/mgs_project/db/`**
 
 #### Regular Query (Nearest Neighbors)
 
