@@ -448,6 +448,9 @@ int main(int argc, char* argv[]) {
     bool use_row_col_files = false;
     bool use_filter = false;
 
+    // Change this whenever the file encoding is modified
+    const int encoding_version = 1;
+
 
     auto cli = (
         clipp::option("--matrix") & clipp::value("folder", matrix_folder),
@@ -527,6 +530,18 @@ int main(int argc, char* argv[]) {
     }
 
     if(!write_to_file) print_to_screen = true;
+
+    string version_file = db_folder + "version.txt";
+
+    ifstream enc_in(version_file);
+    int current_version = -1;
+    enc_in >> current_version;
+    enc_in.close();
+
+    if(current_version != encoding_version){
+        show_error_and_exit("Current matrix version is not supported.\nStored matrix version: "
+            +to_string(current_version)+"\nCurrent decoder version: "+to_string(encoding_version));
+    }
 
     /**
      * For nearest neighbor queries, all the queries inside the same batch are executed sequentiallyly inside a single thread.

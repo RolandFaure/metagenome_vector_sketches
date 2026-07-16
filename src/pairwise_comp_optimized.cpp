@@ -209,7 +209,7 @@ void write_matrix(const string& folder,
 int main(int argc, char* argv[]) {
     // Argument parsing using clipp
     string db_folder, matrix_file;
-    int dimension = 0;
+    int dimension = 2048;
     double max_memory_gb = 0.0;
     int num_threads = 1;
     string output_folder;
@@ -217,6 +217,9 @@ int main(int argc, char* argv[]) {
     int shard_idx = 0;
     int start_shard = 0;
     int end_shard = num_shards;
+    
+    // Change this whenever the file encoding is modified
+    const int encoding_version = 1;
 
     bool show_help = false;
 
@@ -261,6 +264,13 @@ int main(int argc, char* argv[]) {
         }
     }
     cout << "dtypeqs: " << dtype << " dimension: " << dimension << endl;
+
+    string version_file = db_folder + "version.txt";
+    ofstream enc_out(version_file);
+    enc_out<<encoding_version;
+    enc_out.close();
+    
+
 
     if (dtype == "int16"){
         cout << "dtyeom" << endl;
