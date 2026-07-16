@@ -223,7 +223,7 @@ int main(int argc, char* argv[]) {
     auto cli = (
         clipp::required("--db") & clipp::value("folder", db_folder),
         clipp::required("--max_memory_gb") & clipp::value("float", max_memory_gb),
-        clipp::required("--num_threads") & clipp::value("int", num_threads),
+        // clipp::required("--num_threads") & clipp::value("int", num_threads),
         clipp::required("--output_folder") & clipp::value("folder", output_folder),
         clipp::required("--num_shards") & clipp::value("int", num_shards),
         clipp::required("--shard_idx") & clipp::value("int", shard_idx),
@@ -319,7 +319,7 @@ int main(int argc, char* argv[]) {
 
         // omp_set_num_threads(outer_threads);
         // #pragma omp parallel for schedule(dynamic)
-        omp_set_num_threads(num_threads);
+        // omp_set_num_threads(num_threads);
         // for(int i=start_shard; i<end_shard; i++){
             // omp_set_num_threads(inner_threads);
 

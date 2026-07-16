@@ -16,16 +16,6 @@ cd metagenome_vector_sketches
 git submodule update --init --recursive
 ```
 
-<!-- ### Set Up the Conda Environment
-
-Create a new Conda environment named faiss_env and install the required dependencies, including FAISS for fast similarity search.
-
-```Shell
-conda create -n faiss_env python=3.12
-conda activate faiss_env
-conda install -c pytorch faiss-cpu
-conda install -c conda-forge pybind11 scipy matplotlib pandas hdf5 h5py
-``` -->
 ### Build the Executables
 
 Create a build folder, and compile the C++ code using cmake. This step generates all necessary executables inside the build folder.
@@ -65,9 +55,8 @@ The `pairwise_comp_optimized` executable computes the similarity matrix between 
 To compute the matrix:
 
 ```Shell
-../build/pairwise_comp_optimized --db toy_db/ --output_folder toy_index/ --max_memory_gb 12 --num_threads 1 --num_shards 1 --shard_idx 0
+../build/pairwise_comp_optimized --db toy_db/ --output_folder toy_index/ --max_memory_gb 12 --num_shards 1 --shard_idx 0
 ```
-Strategy Note: The default strategy is 0=random projections. You can use --strategy 1 for MinHashes.
 
 ### Query the Pairwise Matrix
 
@@ -77,17 +66,21 @@ The `query_pc_mat` executable allows you to query the computed similarity matrix
 Query Pairwise Comparison Matrix
 
 Usage:
-        ../build/query_pc_mat [--matrix <folder>] [--db <folder>] [--query_file <file>] [--top
-                              <int>] [--thread <int>] [--batch_size <int>] [--write_to_file <file>]
-                              [--show_all] [--print] [--help]
+        ./query_pc_mat [--matrix <folder>] [--db <folder>] [--query_file <file>] [--top <int>]
+                       [--thread <int>] [--batch_size <int>] [--write_to_file <file>] [--show_all]
+                       [--print] [--help]
 
-        ../build/query_pc_mat [--matrix <folder>] [--db <folder>] [--query_ids <ids>...] [--top
-                              <int>] [--thread <int>] [--batch_size <int>] [--write_to_file <file>]
-                              [--show_all] [--print] [--help]
+        ./query_pc_mat [--matrix <folder>] [--db <folder>] [--query_ids <ids>...] [--top <int>]
+                       [--thread <int>] [--batch_size <int>] [--write_to_file <file>] [--show_all]
+                       [--print] [--help]
 
-        ../build/query_pc_mat [--matrix <folder>] [--db <folder>] [--row_file <row> [--col_file]
-                              <col>] [--top <int>] [--thread <int>] [--batch_size <int>]
-                              [--write_to_file <file>] [--show_all] [--print] [--help]
+        ./query_pc_mat [--matrix <folder>] [--db <folder>] [--row_file <row> [--col_file] <col>]
+                       [--top <int>] [--thread <int>] [--batch_size <int>] [--write_to_file <file>]
+                       [--show_all] [--print] [--help]
+
+        ./query_pc_mat [--matrix <folder>] [--db <folder>] [--filter <double> [--out] <folder>]
+                       [--top <int>] [--thread <int>] [--batch_size <int>] [--write_to_file <file>]
+                       [--show_all] [--print] [--help]
 
 Options:
   --matrix       Folder containing the pairwise matrix files
@@ -96,6 +89,8 @@ Options:
   --query_ids    Query IDs as command line arguments (numeric indices or identifiers)
   --row_file     File containing query row IDs (one per line)
   --col_file     File containing query col IDs (one per line)
+  --filter       Filter values below threshold from matrix
+  --out  Output folder for the filtered matrix
   --top  Number of top jaccard values to show [default 10]
   --batch_size   Number of queries to process per batch [default 1000]
   --thread       Number of threads to use [default 1]

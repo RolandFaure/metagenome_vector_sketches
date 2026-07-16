@@ -488,7 +488,6 @@ int main(int argc, char* argv[]) {
         cout << "  --col_file\t File containing query col IDs (one per line)\n";
         cout << "  --filter\t Filter values below threshold from matrix\n";
         cout << "  --out\t Output folder for the filtered matrix\n";
-        // cout << "  --stdin          Read query IDs from standard input\n";
         cout << "  --top\t Number of top jaccard values to show [default 10]\n";
         cout << "  --batch_size\t Number of queries to process per batch [default 1000]\n";
         cout << "  --thread\t Number of threads to use [default 1]\n";
@@ -496,9 +495,6 @@ int main(int argc, char* argv[]) {
         cout << "  --show_all\t Whether to show all neighbors instead of top N\n";
         cout << "  --print\t Whether to print the outputs to screen\n";
         cout << "  --help\t Show this help message\n\n";
-        // cout << "Examples:\n";
-        // cout << "  " << argv[0] << " --matrix_folder ./results --query_ids SRR123456 SRR789012\n";
-        // cout << "  " << argv[0] << " --matrix_folder ./results --query_file queries.txt\n";
         return show_help ? 0 : 1;
     }
 
