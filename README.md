@@ -48,7 +48,7 @@ Use `project_everything` to create projected vectors from fracminhash data. The 
 
 ```Shell
 cd test/
-../build/project_everything toy toy_db/ -t 8 -d 2048 -s 0
+../build/project_everything cas toy toy_db/ -t 8 -d 2048
 ```
 ### Create FAISS Index
 

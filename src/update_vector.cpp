@@ -40,8 +40,20 @@ void add_human_data(const std::string &db_folder, size_t dimension,
         std::cerr << "Failed to read human vector\n";
         return;
     }
+
+    vector<int16_t> updated_vector(dimension);
+    for(size_t i=0; i<buffer.size(); i++){
+        if(buffer[i] > (int)std::numeric_limits<std::int16_t>::max() || 
+                buffer[i] < (int)std::numeric_limits<std::int16_t>::min() ){
+            std::cout<<"Human: "<<buffer[i]<<std::endl;
+        }
+        updated_vector[i] = buffer[i];
+    }
+
+    uint64_t write_bytes_per_vector = dimension * sizeof(int16_t);
+    // vec_out.write(reinterpret_cast<char*>(buffer.data()), bytes_per_vector);
+    vec_out.write(reinterpret_cast<char*>(updated_vector.data()), write_bytes_per_vector);
     
-    vec_out.write(reinterpret_cast<char*>(buffer.data()), bytes_per_vector);
     if (!vec_out) {
         std::cerr << "Human vec Write error\n";
         return;
@@ -76,6 +88,7 @@ void filter_and_write(
     }
 
     size_t total_vectors = sample_norm_vec.size();
+    std::ofstream log_out("log.txt");
 
     for (size_t begin = 0; begin < total_vectors; begin += block_size) {
         std::cout<<"Processing block: "<<begin<<"\n";
@@ -104,10 +117,24 @@ void filter_and_write(
 
             // pointer to this vector inside the block
             int32_t* vec_ptr = buffer.data() + i * dimension;
+            vector<int16_t> updated_vector(dimension);
+            for(size_t i=0; i<dimension; i++){
+                if(vec_ptr[i] > (int)std::numeric_limits<std::int16_t>::max() || 
+                    vec_ptr[i] < (int)std::numeric_limits<std::int16_t>::min()){
+                    std::cout<<global_i<<" "<<i<<" "<<vec_ptr[i]<<" "<<sample_norm_vec[global_i].first << " "
+                     << sample_norm_vec[global_i].second
+                    <<std::endl;
+                }
+                updated_vector[i] = vec_ptr[i];
+            }
+            
 
             // write directly
-            vec_out.write(reinterpret_cast<char*>(vec_ptr),
-                          bytes_per_vector);
+            // vec_out.write(reinterpret_cast<char*>(vec_ptr),
+            //               bytes_per_vector);
+            uint64_t write_bytes_per_vector = dimension * sizeof(int16_t);
+            vec_out.write(reinterpret_cast<char*>(updated_vector.data()),
+                          write_bytes_per_vector);
 
             meta_out << sample_norm_vec[global_i].first << " "
                      << sample_norm_vec[global_i].second << "\n";
