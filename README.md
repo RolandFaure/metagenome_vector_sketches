@@ -30,23 +30,49 @@ make -j 8
 
 ## 🚀 Usage Examples
 
-The following examples use data in the `test` folder. All compiled executables are located inside the `build` folder. **Running any executable without arguments will display its usage instructions.**
+The following examples use the FracMinHash data (signature files) inside the `test/toy/` folder. All compiled executables are located inside the `build` folder. **Running any executable without arguments will display its usage instructions.**
 
 ### Create Projected Vectors
 
-Use `project_everything` to create projected vectors from fracminhash data. The output vectors will be stored in the specified index folder (`toy_index/`).
+Use `project_everything` to create projected vectors from FracMinHash data. 
+
+```shell
+Project FracMinHash Signatures to Vectors
+Usage:
+  Convert mode:
+    ./project_everything convert <signature_folder> <hash_file> [-t threads]
+      signature_folder : Path to folder containing signature files
+      hash_file        : Output hash file path
+      -t, --threads    : Number of threads (default: 1)
+
+  Sketch mode:
+    ./project_everything sketch <hash_file> <db_folder> [-t threads] [-d dimension] 
+      hash_file        : Input hash file path
+      db_folder     : Output folder for generated index files
+      -t, --threads    : Number of threads (default: 1)
+      -d, --dimension  : Vector dimension (default: 2048)
+      --int16          : Use int16 instead of int32 for vector storage
+  Convert & Sketch mode:
+    ./project_everything build <signature_folder> <db_folder> [-t threads] [-d dimension]
+      signature_folder   : Path to folder containing signature files
+      db_folder   : Output folder for generated index files
+      -t, --threads  : Number of threads (default: 1)
+      -d, --dimension: Vector dimension (default: 2048)
+```
+
+For example, to store the output vectors from `test/toy/` to the folder (`toy_db/`):
 
 ```Shell
 cd test/
-../build/project_everything cas toy toy_db/ -t 8 -d 2048
+../build/project_everything build toy toy_db/ -t 8 -d 2048
 ```
-### Create FAISS Index
+<!-- ### Create FAISS Index
 
 After generating vectors, you can create a FAISS index for efficient search using the Python script `jaccard.py`.
 
 ```Shell
 python3 ../src/jaccard.py index toy_db -t 8
-```
+``` -->
 
 ### Compute Pairwise Comparison Matrix
 

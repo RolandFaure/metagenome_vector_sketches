@@ -163,23 +163,23 @@ void load_signatures(std::string file_name, std::unordered_set<unsigned long int
         std::cerr << "Failed to clean up temp directory: " << temp_dir << std::endl;
     }
 
-    #pragma omp critical
-    {
-        // Extract the base name (e.g., DRR111514) from the path
-        std::string stem = fs::path(file_name).stem().string();
-        std::string base_name = stem.substr(0, stem.find('.'));
-        static std::ofstream hash_out("all_hashes.txt", std::ios::app);
-        if (hash_out) {
-            hash_out << base_name << ":";
-            for (const auto& h : hashes) {
-                hash_out << " " << h;
-            }
-            hash_out << "\n";
-            hash_out.flush();
-        } else {
-            std::cerr << "Error opening all_hashes.txt for writing." << std::endl;
-        }
-    }
+    // #pragma omp critical
+    // {
+    //     // Extract the base name (e.g., DRR111514) from the path
+    //     std::string stem = fs::path(file_name).stem().string();
+    //     std::string base_name = stem.substr(0, stem.find('.'));
+    //     static std::ofstream hash_out("all_hashes.txt", std::ios::app);
+    //     if (hash_out) {
+    //         hash_out << base_name << ":";
+    //         for (const auto& h : hashes) {
+    //             hash_out << " " << h;
+    //         }
+    //         hash_out << "\n";
+    //         hash_out.flush();
+    //     } else {
+    //         std::cerr << "Error opening all_hashes.txt for writing." << std::endl;
+    //     }
+    // }
 }
 
 
@@ -220,7 +220,7 @@ void convert(const std::string& folder_name, const std::string& output_file, int
         
         #pragma omp critical
         {
-            cout << "Processed " << sig_files[i] << ", hashes size " << temp_results[i].second.size() << ", file number " << i << endl;
+            cout << "Processed " << sig_files[i] << "\t#hashes:\t" << temp_results[i].second.size()<< endl;
         }
     }
 
@@ -299,7 +299,7 @@ void sketch(const std::string& hash_file, const std::string& index_folder, int d
         
         #pragma omp critical
         {
-            cout << "Projected " << all_hashes[i].first << ", vector dimension " << dimension << ", index " << i << endl;
+            cout << "Projected " << all_hashes[i].first << endl;
         }
     }
 
@@ -336,6 +336,7 @@ void sketch(const std::string& hash_file, const std::string& index_folder, int d
             // if(norm == 0) continue;
             if(norm == 0.0) {
                 std::cerr << "Warning: Vector for " << base_name << " has zero norm." << std::endl; // should create a log file instead
+                continue;
             }
             norm_out << base_name << " " << norm << "\n";
             
@@ -415,7 +416,7 @@ void convert_and_sketch(const std::string& folder_name, const std::string& index
         temp_projected_vectors[i] = {static_cast<int>(hashes.size()), transform_set_into_vector(hashes, dimension)};
         #pragma omp critical
         {
-            cout << "Processed " << sig_files[i] << ", hashes size " << hashes.size() << ", file number " << i << endl;
+            cout << "Processed " << sig_files[i] << "\t#hashes:\t" <<  hashes.size()<< endl;
         }
     }
  
@@ -495,7 +496,7 @@ int main(int argc, char* argv[]) {
     std::string input_path, output_path;
     int t = 1;
     int d = 2048;
-    bool use_int16 = false;
+    bool use_int16 = true;
 
     auto convert_mode = (
         clipp::command("convert").set(is_convert),
@@ -507,19 +508,19 @@ int main(int argc, char* argv[]) {
     auto sketch_mode = (
         clipp::command("sketch").set(is_sketch),
         clipp::value("hash_file", input_path) % "Input hash file path",
-        clipp::value("index_folder", output_path) % "Output folder for index files",
+        clipp::value("db_folder", output_path) % "Output folder for vector database files",
         clipp::option("-t", "--threads") & clipp::integer("threads", t) % "Number of threads (default: 1)",
-        clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)",
-        clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
+        clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)"
+        // clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
     );
 
     auto convert_and_sketch_mode = (
-        clipp::command("cas").set(is_convert_and_sketch),
-        clipp::value("input_folder", input_path),
-        clipp::value("index_folder", output_path),
+        clipp::command("build").set(is_convert_and_sketch),
+        clipp::value("input_folder", input_path) % "Path to folder containing signature files",
+        clipp::value("db_folder", output_path) % "Output folder for vector database files",
         clipp::option("-t", "--threads") & clipp::integer("threads", t) % "Number of threads (default: 1)",
-        clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)",
-        clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
+        clipp::option("-d", "--dimension") & clipp::integer("dimension", d) % "Vector dimension (default: 2048)"
+        // clipp::option("--int16").set(use_int16) % "Use int16 instead of int32 for vector storage"
     );
 
     auto cli = (
@@ -527,6 +528,7 @@ int main(int argc, char* argv[]) {
     );
 
     if (!clipp::parse(argc, argv, cli) || (!is_convert && !is_sketch && !is_convert_and_sketch)) {
+        std::cerr << "Project FracMinHash Signatures to Vectors\n";
         std::cerr << "Usage:\n";
         std::cerr << "  Convert mode:\n";
         std::cerr << "    " << argv[0] << " convert <signature_folder> <hash_file> [-t threads]\n";
@@ -534,20 +536,20 @@ int main(int argc, char* argv[]) {
         std::cerr << "      hash_file        : Output hash file path\n";
         std::cerr << "      -t, --threads    : Number of threads (default: 1)\n\n";
         std::cerr << "  Sketch mode:\n";
-        std::cerr << "    " << argv[0] << " sketch <hash_file> <index_folder> [-t threads] [-d dimension] [--int16]\n";
+        std::cerr << "    " << argv[0] << " sketch <hash_file> <db_folder> [-t threads] [-d dimension] \n";
         std::cerr << "      hash_file        : Input hash file path\n";
-        std::cerr << "      index_folder     : Output folder for index files\n";
+        std::cerr << "      db_folder     : Output folder for generated index files\n";
         std::cerr << "      -t, --threads    : Number of threads (default: 1)\n";
         std::cerr << "      -d, --dimension  : Vector dimension (default: 2048)\n";
-        std::cerr << "      --int16          : Use int16 instead of int32 for vector storage\n";
+        // std::cerr << "      --int16          : Use int16 instead of int32 for vector storage\n";
 
         std::cerr << "  Convert & Sketch mode:\n";
-        std::cerr << "    " << argv[0] << " cas <signature_folder> <index_folder> [-t threads] [-d dimension] [--int16]\n";
-        std::cerr << "  signature_folder   : Path to folder containing signature files\n";
-        std::cerr << "  index_folder   : Output folder for generated index files\n";
-        std::cerr << "  -t, --threads  : Number of threads (default: 1)\n";
-        std::cerr << "  -d, --dimension: Vector dimension (default: 2048)\n";
-        std::cerr << "  --int16        : Use int16 instead of int32 for vector storage\n";
+        std::cerr << "    " << argv[0] << " build <signature_folder> <db_folder> [-t threads] [-d dimension]\n";
+        std::cerr << "      signature_folder   : Path to folder containing signature files\n";
+        std::cerr << "      db_folder   : Output folder for generated index files\n";
+        std::cerr << "      -t, --threads  : Number of threads (default: 1)\n";
+        std::cerr << "      -d, --dimension: Vector dimension (default: 2048)\n";
+        // std::cerr << "  --int16        : Use int16 instead of int32 for vector storage\n";
         return 1;
     }
 
