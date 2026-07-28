@@ -39,10 +39,10 @@ MatrixXll load_matrix_block(const string& file_path, int dimension, int begin, i
         return MatrixXll();
     }
     
-    uint64_t vector_size = dimension * sizeof(int32_t);
+    uint64_t vector_size = dimension * sizeof(int16_t);
     file.seekg(begin * vector_size);
     int num_vectors = end - begin;
-    vector<int32_t> buffer(num_vectors * dimension);
+    vector<int16_t> buffer(num_vectors * dimension);
     file.read(reinterpret_cast<char*>(buffer.data()), num_vectors * vector_size);
     
     MatrixXll matrix(dimension, num_vectors);
@@ -218,7 +218,7 @@ int main(int argc, char* argv[]) {
     int start_shard = 0;
     int end_shard = num_shards;
     
-    // Change this whenever the file encoding is modified
+    // **NOTE: Change this whenever the file encoding is modified**
     const int encoding_version = 1;
 
     bool show_help = false;
@@ -226,10 +226,10 @@ int main(int argc, char* argv[]) {
     auto cli = (
         clipp::required("--db") & clipp::value("folder", db_folder),
         clipp::required("--max_memory_gb") & clipp::value("float", max_memory_gb),
-        // clipp::required("--num_threads") & clipp::value("int", num_threads),
+        clipp::required("--num_threads") & clipp::value("int", num_threads),
         clipp::required("--output_folder") & clipp::value("folder", output_folder),
         clipp::required("--num_shards") & clipp::value("int", num_shards),
-        clipp::required("--shard_idx") & clipp::value("int", shard_idx),
+        // clipp::required("--shard_idx") & clipp::value("int", shard_idx),
         // clipp::option("--start_shard") & clipp::value("int", start_shard),
         // clipp::option("--end_shard") & clipp::value("int", end_shard),
         clipp::option("--help").set(show_help)
@@ -240,22 +240,22 @@ int main(int argc, char* argv[]) {
              << clipp::usage_lines(cli, argv[0]) << endl;
         return show_help ? 0 : 1;
     }
+    
+    if (!output_folder.empty() && output_folder.back() != '/' && output_folder.back() != '\\') {
+        output_folder += '/';
+    }
 
-    string dtype = "int32";
-    string dtype_file = db_folder + "dtype.txt";
-    string norms_file = db_folder + "vector_norms.txt";
+    if (!db_folder.empty() && db_folder.back() != '/' && db_folder.back() != '\\') {
+        db_folder += '/';
+    }
+
+    string norms_file = db_folder + "/vector_norms.txt";
     if (!fs::exists(norms_file)) {
         cerr << "Error: Required file 'vector_norms.txt' not found in output folder: " << db_folder << endl;
         return 1;
     }
-    if (fs::exists(norms_file)) {
-        ifstream dtype_in(dtype_file);
-        if (dtype_in) {
-            getline(dtype_in, dtype);
-            dtype_in.close();
-        }
-    }
-    string dimension_file = db_folder + "dimension.txt";
+
+    string dimension_file = db_folder + "/dimension.txt";
     if (fs::exists(dimension_file)) {
         ifstream dim_in(dimension_file);
         if (dim_in) {
@@ -263,77 +263,53 @@ int main(int argc, char* argv[]) {
             dim_in.close();
         }
     }
-    cout << "dtypeqs: " << dtype << " dimension: " << dimension << endl;
 
-    string version_file = db_folder + "version.txt";
+    string version_file = db_folder + "/version.txt";
     ofstream enc_out(version_file);
     enc_out<<encoding_version;
     enc_out.close();
     
 
+    matrix_file = db_folder + "vectors.bin";
 
-    if (dtype == "int16"){
-        cout << "dtyeom" << endl;
-        return pairwise_comp_optimized_16bits(db_folder, num_threads, output_folder, dimension, num_shards, shard_idx);
+    vector<double> all_norms;
+    string line;
+    ifstream norms_in(norms_file);
+    while (getline(norms_in, line)) {
+        size_t pos = line.find(' ');
+        if (pos == string::npos) continue;
+        double norm = stod(line.substr(pos + 1));
+        all_norms.push_back(norm*norm);
     }
-    else if (dtype != "int16"){
+    // Calculate chunk size
+    int bytes_per_vector = dimension * sizeof(int32_t);
+    int64_t max_bytes = static_cast<int64_t>(max_memory_gb * 1024 * 1024 * 1024);
+    // cout << "max bytes " << max_bytes << " " << max_memory_gb << endl;
+    int size_of_chunk = max_bytes / (bytes_per_vector * bytes_per_vector);
 
-        // Ensure output folder ends with '/'
-        if (!output_folder.empty() && output_folder.back() != '/' && output_folder.back() != '\\') {
-            output_folder += '/';
-        }
+    cout << "Using chunks of size " << size_of_chunk << endl;
 
-        if (!db_folder.empty() && db_folder.back() != '/' && db_folder.back() != '\\') {
-            db_folder += '/';
-        }
+    // Get total number of vectors
+    ifstream file(matrix_file, ios::ate | ios::binary);
+    int64_t file_size = file.tellg();
+    file.close();
+    int total_vectors = file_size / bytes_per_vector;
 
-        matrix_file = db_folder + "vectors.bin";
+    cout << "Total vectors: " << total_vectors << endl;
 
-        string norms_file = db_folder + "vector_norms.txt";
-        if (!fs::exists(norms_file)) {
-            cerr << "Error: Required file 'vector_norms.txt' not found in output folder: " << db_folder << endl;
-            return 1;
-        }
+    auto start_time = chrono::high_resolution_clock::now();
+    
+    // int outer_threads = min(num_threads, min(8, num_shards));
+    // int inner_threads = max(1, num_threads / outer_threads);
+    // omp_set_nested(1);
+    // omp_set_max_active_levels(2);
 
-        vector<double> all_norms;
-        string line;
-        ifstream norms_in(norms_file);
-        while (getline(norms_in, line)) {
-            size_t pos = line.find(' ');
-            if (pos == string::npos) continue;
-            double norm = stod(line.substr(pos + 1));
-            all_norms.push_back(norm*norm);
-        }
-        // Calculate chunk size
-        int bytes_per_vector = dimension * sizeof(int32_t);
-        int64_t max_bytes = static_cast<int64_t>(max_memory_gb * 1024 * 1024 * 1024);
-        cout << "max bytes " << max_bytes << " " << max_memory_gb << endl;
-        int size_of_chunk = max_bytes / (bytes_per_vector * bytes_per_vector);
+    // omp_set_num_threads(outer_threads);
+    // #pragma omp parallel for schedule(dynamic)
+    omp_set_num_threads(num_threads);
+    #pragma omp parallel for schedule(static)
 
-        cout << "Using chunks of size " << size_of_chunk << endl;
-
-        // Get total number of vectors
-        ifstream file(matrix_file, ios::ate | ios::binary);
-        int64_t file_size = file.tellg();
-        file.close();
-        int total_vectors = file_size / bytes_per_vector;
-
-        cout << "Total vectors: " << total_vectors << endl;
-
-        auto start_time = chrono::high_resolution_clock::now();
-        
-        // int outer_threads = min(num_threads, min(8, num_shards));
-        // int inner_threads = max(1, num_threads / outer_threads);
-        // omp_set_nested(1);
-        // omp_set_max_active_levels(2);
-
-        // omp_set_num_threads(outer_threads);
-        // #pragma omp parallel for schedule(dynamic)
-        // omp_set_num_threads(num_threads);
-        // for(int i=start_shard; i<end_shard; i++){
-            // omp_set_num_threads(inner_threads);
-
-            // shard_idx = i;
+    for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
         string shard_folder = output_folder + "shard_" + to_string(shard_idx) + "/";
         if (!fs::exists(shard_folder)) {
             fs::create_directories(shard_folder);
@@ -346,8 +322,11 @@ int main(int argc, char* argv[]) {
 
         // begin_row = 1372094;
         // end_row = begin_row + 2;
-
-        cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row-1 << endl;
+        #pragma omp critical
+        {
+            cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row-1 << endl;
+        }
+        
 
         vector<tuple<int, int, int64_t>> all_results;
 
@@ -389,8 +368,11 @@ int main(int argc, char* argv[]) {
         
         auto end_time = chrono::high_resolution_clock::now();
         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
-
-        cout << "Total computation time: " << duration.count() << " ms" << endl;
+        #pragma omp critical
+        {
+            cout<<"Shard "<<shard_idx << " complete. Time: " << duration.count() << " ms" << endl;
+        }
+        
     }
     
     return 0;
