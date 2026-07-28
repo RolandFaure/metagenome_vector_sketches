@@ -38,7 +38,7 @@ MatrixXll load_matrix_block(const string& file_path, int dimension, int begin, i
         cerr << "Error opening file: " << file_path << endl;
         return MatrixXll();
     }
-    
+
     uint64_t vector_size = dimension * sizeof(int16_t);
     file.seekg(begin * vector_size);
     int num_vectors = end - begin;
@@ -53,6 +53,19 @@ MatrixXll load_matrix_block(const string& file_path, int dimension, int begin, i
     }
     
     return matrix;
+}
+
+void compare_matrix(MatrixXll mat1, MatrixXll mat2, int shard){
+    for(size_t i=0; i<mat1.rows(); i++){
+        for(size_t j=0; j<mat1.cols(); j++){
+            if(mat1(i,j) != mat2(i,j)){
+                std::cout<<"mismatch "<<shard<<" "<<i<<" "<<j<<std::endl;
+                std::cout<<mat1(i,j)<<" "<<mat2(i,j)<<std::endl;
+                exit(1);
+            }
+        }
+
+    }
 }
 
 // Optimized sparse dot product computation with early threshold checking
@@ -282,12 +295,12 @@ int main(int argc, char* argv[]) {
         all_norms.push_back(norm*norm);
     }
     // Calculate chunk size
-    int bytes_per_vector = dimension * sizeof(int32_t);
+    int bytes_per_vector = dimension * sizeof(int16_t);
     int64_t max_bytes = static_cast<int64_t>(max_memory_gb * 1024 * 1024 * 1024);
     // cout << "max bytes " << max_bytes << " " << max_memory_gb << endl;
     int size_of_chunk = max_bytes / (bytes_per_vector * bytes_per_vector);
 
-    cout << "Using chunks of size " << size_of_chunk << endl;
+    cout << "Using chunks of size " << size_of_chunk <<" dimension: "<<dimension << endl;
 
     // Get total number of vectors
     ifstream file(matrix_file, ios::ate | ios::binary);
@@ -326,7 +339,7 @@ int main(int argc, char* argv[]) {
         {
             cout << "Shard " << shard_idx << " processing rows " << begin_row << " to " << end_row-1 << endl;
         }
-        
+        if(begin_row >= end_row) continue;
 
         vector<tuple<int, int, int64_t>> all_results;
 
@@ -343,7 +356,7 @@ int main(int argc, char* argv[]) {
                 int end_j = min(begin_j + size_of_chunk, total_vectors);
 
                 // auto t_blockj_start = chrono::high_resolution_clock::now();
-                MatrixXll block_j = load_matrix_block(matrix_file, dimension, begin_j, end_j);
+                MatrixXll block_j = load_matrix_block(matrix_file, dimension, begin_j, end_j);    
                 VectorXd norms_j = Map<VectorXd>(all_norms.data() + begin_j, end_j - begin_j);
                 // auto t_blockj_end = chrono::high_resolution_clock::now();
 

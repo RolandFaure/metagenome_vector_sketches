@@ -468,6 +468,9 @@ void convert_and_sketch(const std::string& folder_name, const std::string& index
                     } else {
                         val16 = static_cast<int16_t>(val32);
                     }
+                    if(val32 != val16){
+                        std::cout<<i<<" "<<val16<<" "<<val32<<std::endl;
+                    }
                     bin_out.write(reinterpret_cast<const char*>(&val16), sizeof(int16_t));
                 }
             } else {
