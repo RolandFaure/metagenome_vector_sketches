@@ -250,7 +250,7 @@ int main(int argc, char* argv[]) {
         cout << "  --output_folder   Folder where to store the matrix [Required]\n";
         cout << "  --num_threads     Numer of threads to use [default 1]\n";
         cout << "  --num_shards      Number of shards to use [default 1]\n";
-        cout << "  --max_memory_gb   Max memory to be used per shard [default 1 GB]\n";
+        cout << "  --max_memory_gb   Max memory to be used per thread [default 1 GB]\n";
         cout << "  --help            Show this help message\n\n";
         return show_help ? 0 : 1;
     }

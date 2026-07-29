@@ -84,7 +84,7 @@ Options:
   --output_folder   Folder where to store the matrix [Required]
   --num_threads     Numer of threads to use [default 1]
   --num_shards      Number of shards to use [default 1]
-  --max_memory_gb   Max memory to be used per shard [default 1 GB]
+  --max_memory_gb   Max memory to be used per thread [default 1 GB]
   --help            Show this help message
 ```
 
