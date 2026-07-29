@@ -250,6 +250,9 @@ namespace pc_mat {
         string index_filename = new_shard_folder + "/row_index.bin";
         ofstream index_out(index_filename, ios::binary);
 
+        // string ngh_list_fn = new_shard_folder + "/neighbor_list.txt";
+        // ofstream ngh_list_out(ngh_list_fn);
+
         bits::rice_sequence<> rs_start;
         rs_start.load(ngh_in);
         ngh_in.close();
@@ -283,7 +286,7 @@ namespace pc_mat {
             auto neighbor_index = rs_start.access(curr_idx);
             auto similarity = cv_jc.access(0);
             bool is_first_neighbor_found = false;
-            if(similarity > threshold){
+            if(similarity >= threshold){
                 is_first_neighbor_found = true;
                 start_neighbor.emplace_back(neighbor_index);
                 neighbor_indx_vec.emplace_back(neighbor_index);
@@ -293,7 +296,7 @@ namespace pc_mat {
             for(int i=1; i<number_of_neighbors; i++){
                 auto similarity = cv_jc.access(i);
                 neighbor_index +=  rs_delta.access(i-1);
-                if(similarity <= threshold) continue;
+                if(similarity < threshold) continue;
                 if(!is_first_neighbor_found){
                     start_neighbor.emplace_back(neighbor_index);
                 }
@@ -314,12 +317,16 @@ namespace pc_mat {
             cv_jc_out.save(bin_out);
             
             assert(neighbor_jaccard_vec.size() >= 1);
+
+            // ngh_list_out<<neighbor_indx_vec.size()<<std::endl;
             
             if(neighbor_jaccard_vec.size() == 1) continue;
             
             bits::rice_sequence<> rs_delta_out;
             rs_delta_out.encode(delta_cols.begin(), delta_cols.size());
             rs_delta_out.save(bin_out);
+
+
         }
         bin_out.flush();     
         bin_out.close();

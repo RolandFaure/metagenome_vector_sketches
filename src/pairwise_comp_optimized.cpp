@@ -387,6 +387,11 @@ int main(int argc, char* argv[]) {
         }
         
     }
+
+    auto end_time = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::seconds>(end_time - start_time);
+    cout<<"All shards complete. Time: " << duration.count()/100 << " ms" << endl;
+    
     
     return 0;
 }
