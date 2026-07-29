@@ -116,7 +116,7 @@ void filter_and_write(
 
             if (sample_norm_vec[global_i].second == 0)
                 continue;
-            if(wgs_set.count(sample_norm_vec[global_i].first) == 0) continue;
+            if(wgs_set.count(sample_norm_vec[global_i].first) != 0) continue;
 
             // pointer to this vector inside the block
             int32_t* vec_ptr = buffer.data() + i * dimension;
