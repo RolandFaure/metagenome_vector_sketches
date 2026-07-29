@@ -5,7 +5,7 @@ project(DotHash LANGUAGES CXX)
 # set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -ffast-math -DNDEBUG")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -ffast-math -DNDEBUG -w")
 set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS}")
 
 # ==== OpenMP ====
@@ -21,7 +21,7 @@ find_path(EIGEN_INCLUDE_DIR Eigen/Dense
 )
 if(EIGEN_INCLUDE_DIR)
     message(STATUS "Found Eigen in ${EIGEN_INCLUDE_DIR}")
-    include_directories(${EIGEN_INCLUDE_DIR})
+    include_directories(SYSTEM ${EIGEN_INCLUDE_DIR})
 else()
     message(WARNING "Eigen not found in standard paths; please set EIGEN_INCLUDE_DIR manually")
 endif()
@@ -42,7 +42,7 @@ target_include_directories(cnpy PUBLIC
 target_link_libraries(cnpy PUBLIC ZLIB::ZLIB)
 
 # ===== HDF5 ======
-add_subdirectory(external/HighFive)
+add_subdirectory(external/HighFive SYSTEM)
 
 # ==== Executables ====
 add_executable(project_everything

@@ -451,10 +451,9 @@ int main(int argc, char* argv[]) {
     // Change this whenever the file encoding is modified
     const int encoding_version = 1;
 
-
     auto cli = (
-        clipp::option("--matrix") & clipp::value("folder", matrix_folder),
-        clipp::option("--db") & clipp::value("folder", db_folder),
+        clipp::required("--matrix") & clipp::value("folder", matrix_folder),
+        clipp::required("--db") & clipp::value("folder", db_folder),
         (
             (clipp::option("--query_file").set(use_query_file) & clipp::value("file", query_file)) |
             (clipp::option("--query_ids").set(use_query_ids) & clipp::values("ids", query_ids_str)) |
@@ -483,21 +482,23 @@ int main(int argc, char* argv[]) {
         cout << "Query Pairwise Comparison Matrix\n\n";
         cout << "Usage:\n" << clipp::usage_lines(cli, argv[0]) << "\n\n";
         cout << "Options:\n";
-        cout << "  --matrix\t Folder containing the pairwise matrix files\n";
-        cout << "  --db\t Folder containing the matrix meta data\n";
-        cout << "  --query_file\t File containing query IDs (one per line)\n";
-        cout << "  --query_ids\t Query IDs as command line arguments (numeric indices or identifiers)\n";
-        cout << "  --row_file\t File containing query row IDs (one per line)\n";
-        cout << "  --col_file\t File containing query col IDs (one per line)\n";
-        cout << "  --filter\t Filter values below threshold from matrix\n";
-        cout << "  --out\t Output folder for the filtered matrix\n";
-        cout << "  --top\t Number of top jaccard values to show [default 10]\n";
-        cout << "  --batch_size\t Number of queries to process per batch [default 1000]\n";
-        cout << "  --thread\t Number of threads to use [default 1]\n";
-        cout << "  --write_to_file\t Where to save the output (expected format: *.csv/*.tsv/*.npy/*npz/*h5 for row-col query. *.csv/*tsv/*txt for regular query).\n";
-        cout << "  --show_all\t Whether to show all neighbors instead of top N\n";
-        cout << "  --print\t Whether to print the outputs to screen\n";
-        cout << "  --help\t Show this help message\n\n";
+        cout << "  --matrix        : Folder containing the pairwise matrix files [Required]\n";
+        cout << "  --db            : Folder containing the matrix meta data [Required]\n";
+        cout << "  --query_file    : File containing query IDs (one per line)\n";
+        cout << "  --query_ids     : Query IDs as command line arguments (identifiers separated by space)\n";
+        cout << "  --row_file      : File containing query row IDs (one per line)\n";
+        cout << "  --col_file      : File containing query col IDs (one per line)\n";
+        cout << "  --filter        : Filter values below threshold from matrix\n";
+        cout << "  --out           : Output folder for the filtered matrix\n";
+        cout << "  --top           : Number of top jaccard values to show [default 10]\n";
+        cout << "  --batch_size    : Number of queries to process per batch [default 1000]\n";
+        cout << "  --thread        : Number of threads to use [default 1]\n";
+        cout << "  --write_to_file : Where to save the output. Expected format: \n"
+             << "                    - *.csv/*tsv/*txt for regular query.\n"     
+             << "                    - *.csv/*.tsv/*.npy/*npz/*h5 for row-col query.\n";
+        cout << "  --show_all      : Whether to show all neighbors instead of top N\n";
+        cout << "  --print         : Whether to print the outputs to screen\n";
+        cout << "  --help          : Show this help message\n\n";
         return show_help ? 0 : 1;
     }
 

@@ -349,19 +349,12 @@ namespace pc_mat {
 
     // Convert query string to index (supports both numeric indices and identifiers)
     int parse_query_to_index(const string& query_str, const unordered_map<string, int>& id_to_index) {
-        // First try to parse as a number
-        try {
-            int index = stoi(query_str);
-            return index;
-        } catch (const exception& e) {
-            // If parsing as number fails, try to look up as identifier
-            auto it = id_to_index.find(query_str);
-            if (it != id_to_index.end()) {
-                return it->second;
-            } else {
-                cerr << "Warning: Could not find identifier '" << query_str << "'" << endl;
-                return -1; // Invalid index
-            }
+        auto it = id_to_index.find(query_str);
+        if (it != id_to_index.end()) {
+            return it->second;
+        } else {
+            cerr << "Warning: Could not find identifier '" << query_str << "'" << endl;
+            return -1; // Invalid index
         }
     }
 

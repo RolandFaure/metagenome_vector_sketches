@@ -541,17 +541,17 @@ int main(int argc, char* argv[]) {
         std::cerr << "  Sketch mode:\n";
         std::cerr << "    " << argv[0] << " sketch <hash_file> <db_folder> [-t threads] [-d dimension] \n";
         std::cerr << "      hash_file        : Input hash file path\n";
-        std::cerr << "      db_folder     : Output folder for generated index files\n";
+        std::cerr << "      db_folder        : Output folder for generated vector and auxiliary files\n";
         std::cerr << "      -t, --threads    : Number of threads (default: 1)\n";
         std::cerr << "      -d, --dimension  : Vector dimension (default: 2048)\n";
         // std::cerr << "      --int16          : Use int16 instead of int32 for vector storage\n";
 
         std::cerr << "  Convert & Sketch mode:\n";
         std::cerr << "    " << argv[0] << " build <signature_folder> <db_folder> [-t threads] [-d dimension]\n";
-        std::cerr << "      signature_folder   : Path to folder containing signature files\n";
-        std::cerr << "      db_folder   : Output folder for generated index files\n";
-        std::cerr << "      -t, --threads  : Number of threads (default: 1)\n";
-        std::cerr << "      -d, --dimension: Vector dimension (default: 2048)\n";
+        std::cerr << "      signature_folder : Path to folder containing signature files\n";
+        std::cerr << "      db_folder        : Output folder for generated vector and auxiliary files\n";
+        std::cerr << "      -t, --threads    : Number of threads (default: 1)\n";
+        std::cerr << "      -d, --dimension  : Vector dimension (default: 2048)\n";
         // std::cerr << "  --int16        : Use int16 instead of int32 for vector storage\n";
         return 1;
     }

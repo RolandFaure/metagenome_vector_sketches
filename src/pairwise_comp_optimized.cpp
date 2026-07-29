@@ -223,13 +223,10 @@ int main(int argc, char* argv[]) {
     // Argument parsing using clipp
     string db_folder, matrix_file;
     int dimension = 2048;
-    double max_memory_gb = 0.0;
+    double max_memory_gb = 1;
     int num_threads = 1;
     string output_folder;
     int num_shards = 1;
-    int shard_idx = 0;
-    int start_shard = 0;
-    int end_shard = num_shards;
     
     // **NOTE: Change this whenever the file encoding is modified**
     const int encoding_version = 1;
@@ -238,19 +235,23 @@ int main(int argc, char* argv[]) {
 
     auto cli = (
         clipp::required("--db") & clipp::value("folder", db_folder),
-        clipp::required("--max_memory_gb") & clipp::value("float", max_memory_gb),
-        clipp::required("--num_threads") & clipp::value("int", num_threads),
         clipp::required("--output_folder") & clipp::value("folder", output_folder),
-        clipp::required("--num_shards") & clipp::value("int", num_shards),
-        // clipp::required("--shard_idx") & clipp::value("int", shard_idx),
-        // clipp::option("--start_shard") & clipp::value("int", start_shard),
-        // clipp::option("--end_shard") & clipp::value("int", end_shard),
+        clipp::option("--num_shards") & clipp::value("int", num_shards),
+        clipp::option("--max_memory_gb") & clipp::value("float", max_memory_gb),
+        clipp::option("--num_threads") & clipp::value("int", num_threads),
         clipp::option("--help").set(show_help)
     );
 
     if (!clipp::parse(argc, argv, cli) || show_help) {
-        cout << "Usage:\n"
-             << clipp::usage_lines(cli, argv[0]) << endl;
+        cout << "Create Pairwise Comparison Matrix\n\n";
+        cout << "Usage:\n" << clipp::usage_lines(cli, argv[0]) << "\n\n";
+        cout << "Options:\n";   
+        cout << "  --db              Folder containing the matrix meta data [Required]\n";
+        cout << "  --output_folder   Folder where to store the matrix [Required]\n";
+        cout << "  --num_threads     Numer of threads to use [default 1]\n";
+        cout << "  --num_shards      Number of shards to use [default 1]\n";
+        cout << "  --max_memory_gb   Max memory to be used per shard [default 1 GB]\n";
+        cout << "  --help            Show this help message\n\n";
         return show_help ? 0 : 1;
     }
     
@@ -390,7 +391,7 @@ int main(int argc, char* argv[]) {
 
     auto end_time = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::seconds>(end_time - start_time);
-    cout<<"All shards complete. Time: " << duration.count()/100 << " ms" << endl;
+    cout<<"All shards complete. Time: " << duration.count() << " s" << endl;
     
     
     return 0;
