@@ -81,8 +81,8 @@ void filter_and_write(
         return;
     }
 
-    std::ofstream vec_out(db_folder + "wgs_filtered_vectors.bin", std::ios::binary);
-    std::ofstream meta_out(db_folder + "wgs_filtered_sample_norm.txt");
+    std::ofstream vec_out(db_folder + "non_wgs_filtered_vectors.bin", std::ios::binary);
+    std::ofstream meta_out(db_folder + "non_wgs_filtered_sample_norm.txt");
 
     if (!vec_out || !meta_out) {
         std::cerr << "Failed to open output files\n";
@@ -117,6 +117,7 @@ void filter_and_write(
             if (sample_norm_vec[global_i].second == 0)
                 continue;
             if(wgs_set.count(sample_norm_vec[global_i].first) != 0) continue;
+            if(sample_norm_vec[global_i].first == "human_genome_sketches_merged") continue;
 
             // pointer to this vector inside the block
             int32_t* vec_ptr = buffer.data() + i * dimension;
@@ -124,7 +125,7 @@ void filter_and_write(
             for(size_t i=0; i<dimension; i++){
                 if(vec_ptr[i] > (int)std::numeric_limits<std::int16_t>::max() || 
                     vec_ptr[i] < (int)std::numeric_limits<std::int16_t>::min()){
-                    std::cout<<global_i<<" "<<i<<" "<<vec_ptr[i]<<" "<<sample_norm_vec[global_i].first << " "
+                    std::cout<<"FLAG: "<<global_i<<" "<<i<<" "<<vec_ptr[i]<<" "<<sample_norm_vec[global_i].first << " "
                      << sample_norm_vec[global_i].second
                     <<std::endl;
                 }
