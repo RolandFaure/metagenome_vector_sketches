@@ -228,7 +228,6 @@ namespace pc_mat {
     }
 
     void filter_matrix_for_shard(std::string shard_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, double filter){
-        const double MULT_CONST = (1ULL << 8) - 1;
         uint32_t threshold = round(filter * MULT_CONST); //everything below and equal to threshold will be skipped
         
         const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
@@ -422,8 +421,6 @@ namespace pc_mat {
         uint32_t total_vectors = vector_norms.size();
         // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
 
-        const double MULT_CONST = (1ULL << 8) - 1;
-
         // Query all at once using load_neighbors_for_rows
         std::vector<Neighbors> all_neighbors = load_neighbors_for_rows(matrix_folder, queries, total_vectors, num_shards);
 
@@ -457,7 +454,9 @@ namespace pc_mat {
                     std::string neighbor_id = (neighbor_idx < total_vectors) ? 
                                     identifiers[neighbor_idx] : "UNKNOWN";
                     res.neighbor_ids.push_back(neighbor_id);
-                    res.jaccard_similarities.push_back(static_cast<double>(neighbor_jaccard)/MULT_CONST);
+                    double jc = static_cast<double>(neighbor_jaccard)/MULT_CONST;
+                    jc = round(jc * DECIMAL_PRECISION_DIVISOR) / DECIMAL_PRECISION_DIVISOR; 
+                    res.jaccard_similarities.push_back(jc);
                     // if(n < 10)
                     //     std::cout<<neighbor_jaccard<<" "<<static_cast<double>(neighbor_jaccard)/MULT_CONST<<std::endl;
                 }
@@ -565,8 +564,6 @@ namespace pc_mat {
             cerr << "Error: No shard folders found in " << matrix_folder << endl;
         }
 
-        const double MULT_CONST = (1ULL << 8) - 1;
-
         vector<std::vector<uint32_t> > all_neighbors = load_neighbors_for_slice(matrix_folder, row_queries_vec, 
             col_queries_vec, total_vectors, num_shards);
 
@@ -584,7 +581,9 @@ namespace pc_mat {
             else{
                 assert(neighbors.size() == col_queries_vec.size());
                 for(size_t i=0; i<col_queries_vec.size(); i++){
-                    res.push_back( static_cast<double>(neighbors[i]) / MULT_CONST);
+                    double jc = static_cast<double>(neighbors[i]) / MULT_CONST;
+                    jc = round(jc * DECIMAL_PRECISION_DIVISOR) / DECIMAL_PRECISION_DIVISOR; // To store upto 3 decimal points;
+                    res.push_back(jc);
                 }
             }
             all_results[q] = std::move(res);

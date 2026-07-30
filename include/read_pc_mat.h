@@ -26,6 +26,9 @@ namespace pc_mat{
     {
         std::vector<std::pair<uint64_t, uint32_t>> index_jaccard;
     };
+
+    const double MULT_CONST = (1ULL << 8) - 1; // To store values within 8 bits
+    const double DECIMAL_PRECISION_DIVISOR = 1000; // To store only upto 3 decimal points.
     
 
     // Function to decompress zstd files if they exist and track them
