@@ -159,7 +159,6 @@ namespace pc_mat {
         unordered_map<int, std::vector<uint32_t> > shard_to_queries;
         for (uint32_t i = 0; i < rows.size(); ++i) {
             int shard_idx = get_shard_for_row(rows[i], total_vectors, num_shards);
-            // int shard_idx = 0;
             shard_to_queries[shard_idx].emplace_back(i);
         }
 
@@ -167,7 +166,6 @@ namespace pc_mat {
         std::vector<Neighbors> results(rows.size());
         
         for(const auto &[shard_idx, query_index_vec]: shard_to_queries){
-            // std::cout<<"shard: "<<shard_idx<<std::endl;
             
             std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
             uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
@@ -214,12 +212,13 @@ namespace pc_mat {
                 
                 result.index_jaccard[0] = std::make_pair(rs_start.access(curr_query_build_index), 
                                                 cv_jc.access(0));
+                // std::cout<<result.index_jaccard[0].first<<" "<<result.index_jaccard[0].second<<std::endl;
 
                 for(int i=1; i<number_of_neighbors; i++){
                     result.index_jaccard[i] = std::make_pair(result.index_jaccard[i-1].first 
                                 + rs_delta.access(i-1), cv_jc.access(i));
                     // if(i < 10)
-                    //     std::cout<<result.index_jaccard[i].first<<" "<<result.index_jaccard[i].second<<std::endl;
+                    //     std::cout<<result.index_jaccard[i].first<<" "<<rs_delta.access(i-1)<<" "<<result.index_jaccard[i].second<<std::endl;
                 }
                 results[query_index] = std::move(result);
             }
@@ -280,9 +279,6 @@ namespace pc_mat {
             neighbor_indx_vec.reserve(cv_jc.size());
             neighbor_jaccard_vec.reserve(cv_jc.size());
 
-            // this is always at least 1 because of self similarity
-            assert(cv_jc.access(0) == 255);
-
             auto neighbor_index = rs_start.access(curr_idx);
             auto similarity = cv_jc.access(0);
             bool is_first_neighbor_found = false;
@@ -298,6 +294,7 @@ namespace pc_mat {
                 neighbor_index +=  rs_delta.access(i-1);
                 if(similarity < threshold) continue;
                 if(!is_first_neighbor_found){
+                    is_first_neighbor_found = true;
                     start_neighbor.emplace_back(neighbor_index);
                 }
                 neighbor_indx_vec.emplace_back(neighbor_index);
@@ -325,8 +322,6 @@ namespace pc_mat {
             bits::rice_sequence<> rs_delta_out;
             rs_delta_out.encode(delta_cols.begin(), delta_cols.size());
             rs_delta_out.save(bin_out);
-
-
         }
         bin_out.flush();     
         bin_out.close();
@@ -425,7 +420,7 @@ namespace pc_mat {
             cerr << "Error: No shard folders found in " << matrix_folder << endl;
         }
         uint32_t total_vectors = vector_norms.size();
-        // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
+        cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
 
         const double MULT_CONST = (1ULL << 8) - 1;
 

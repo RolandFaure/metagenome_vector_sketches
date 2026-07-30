@@ -79,7 +79,7 @@ void query_nearest_neighbors(
     if (queries.empty()) {
         show_error_and_exit("Error: No valid queries found");
     }
-    
+
     std::vector<float> vector_norms;
     pc_mat::load_vector_norms(db_folder, vector_norms);
 
@@ -89,7 +89,9 @@ void query_nearest_neighbors(
         show_error_and_exit("Error: Could not determine total number of vectors");
     }
     
-    auto [fname, out_file_path] = split_path(out_fn);
+    auto file_info = split_path(out_fn);
+    std::string fname = file_info.first;
+    std::string out_file_path = file_info.second;
     
     auto start_total = std::chrono::high_resolution_clock::now();
     
