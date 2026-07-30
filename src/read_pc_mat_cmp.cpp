@@ -420,7 +420,7 @@ namespace pc_mat {
             cerr << "Error: No shard folders found in " << matrix_folder << endl;
         }
         uint32_t total_vectors = vector_norms.size();
-        cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
+        // cout << "Found " << num_shards << " shards with " << total_vectors << " total vectors" << endl;
 
         const double MULT_CONST = (1ULL << 8) - 1;
 

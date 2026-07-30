@@ -6,7 +6,7 @@ This repository provides code for sketching genomic data using random projection
 
 Follow these steps to set up the necessary environment and build the executables.
 
-### Clone the Repository
+### Setting up the Repository
 
 Clone the repository and its submodules recursively:
 
@@ -14,6 +14,14 @@ Clone the repository and its submodules recursively:
 git clone --recursive https://github.com/RolandFaure/metagenome_vector_sketches.git
 cd metagenome_vector_sketches
 git submodule update --init --recursive
+```
+
+You can use conda to install the dependencies:
+
+```shell
+conda create -n mgs python=3.12
+conda activate mgs
+conda install -c conda-forge hdf5 h5py
 ```
 
 ### Build the Executables
