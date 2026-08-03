@@ -228,7 +228,7 @@ namespace pc_mat {
     }
 
     void filter_matrix_for_shard(std::string shard_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, double filter){
-        uint32_t threshold = round(filter * MULT_CONST); //everything below and equal to threshold will be skipped
+        // uint32_t threshold = round(filter * MULT_CONST); //everything below and equal to threshold will be skipped
         
         const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
                 start_row);
@@ -280,8 +280,9 @@ namespace pc_mat {
 
             auto neighbor_index = rs_start.access(curr_idx);
             auto similarity = cv_jc.access(0);
+            double jaccard = static_cast<double>(similarity) / MULT_CONST;
             bool is_first_neighbor_found = false;
-            if(similarity >= threshold){
+            if(jaccard >= filter){
                 is_first_neighbor_found = true;
                 start_neighbor.emplace_back(neighbor_index);
                 neighbor_indx_vec.emplace_back(neighbor_index);
@@ -291,7 +292,8 @@ namespace pc_mat {
             for(int i=1; i<number_of_neighbors; i++){
                 auto similarity = cv_jc.access(i);
                 neighbor_index +=  rs_delta.access(i-1);
-                if(similarity < threshold) continue;
+                double jaccard = static_cast<double>(similarity) / MULT_CONST;
+                if(jaccard < filter) continue;
                 if(!is_first_neighbor_found){
                     is_first_neighbor_found = true;
                     start_neighbor.emplace_back(neighbor_index);
