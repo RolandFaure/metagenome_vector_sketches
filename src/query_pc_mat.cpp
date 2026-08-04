@@ -447,11 +447,11 @@ void update_matrix_from_list(std::string matrix_folder, std::string db_folder, s
     uint64_t rows_per_shard_prev = (total_vectors_prev + num_shards - 1) / num_shards;
 
     std::vector<uint32_t> acc_vec;
-    std::unordered_map<uint32_t, uint32_t> new_index_to_prev_index;
+    
     std::vector<uint32_t> new_index_to_prev_index_vec(identifiers_new.size()); //works like a map
     
     for(size_t i=0; i<identifiers_new.size(); i++){
-        uint32_t prev_index = id_to_index_prev[identifiers_new[i]];
+        uint32_t prev_index = id_to_index_prev.at(identifiers_new[i]);
         acc_vec.push_back(prev_index);
         new_index_to_prev_index_vec[i] = prev_index;
 
@@ -474,8 +474,11 @@ void update_matrix_from_list(std::string matrix_folder, std::string db_folder, s
 
         fs::path dir_path = new_shard_folder;
         fs::create_directories(dir_path);
+        #pragma omp critical
+        {
+            std::cout<<"Writing updated matrix in "<<new_shard_folder<<std::endl;
+        }
         
-        std::cout<<"Writing updated matrix in "<<new_shard_folder<<std::endl;
 
         uint64_t start_row = shard_idx * rows_per_shard_new;
         uint64_t end_row = min(start_row + rows_per_shard_new, total_vectors_new);

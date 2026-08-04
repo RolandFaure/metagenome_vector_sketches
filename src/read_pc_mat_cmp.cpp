@@ -621,7 +621,7 @@ namespace pc_mat {
         for(size_t i=0; i<results.size(); i++){
             std::vector<uint32_t> neighbor_indx_vec;
             std::vector<uint16_t> neighbor_jaccard_vec;
-            auto result_row_vec = results[i];
+            const auto& result_row_vec = results[i];
             neighbor_indx_vec.reserve(result_row_vec.size());
             neighbor_jaccard_vec.reserve(result_row_vec.size());
 
@@ -640,9 +640,10 @@ namespace pc_mat {
                 start_neighbor.push_back(neighbor_indx_vec[0]);
             }
 
-            std::vector<uint64_t> delta_cols(neighbor_indx_vec.size());
+            std::vector<uint64_t> delta_cols;
+            delta_cols.reserve(neighbor_indx_vec.size());
             for (size_t k = 1; k < neighbor_indx_vec.size(); ++k) {
-                delta_cols[k-1] = neighbor_indx_vec[k] - neighbor_indx_vec[k-1];
+                delta_cols.push_back(neighbor_indx_vec[k] - neighbor_indx_vec[k-1]);
             }
             bits::compact_vector cv_jc;
             cv_jc.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
