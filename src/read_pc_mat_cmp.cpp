@@ -343,6 +343,7 @@ namespace pc_mat {
         ngh_out.close();
     }
 
+
     // Convert query string to index (supports both numeric indices and identifiers)
     int parse_query_to_index(const string& query_str, const unordered_map<string, int>& id_to_index) {
         auto it = id_to_index.find(query_str);
@@ -355,9 +356,9 @@ namespace pc_mat {
     }
 
     // Read queries from file
-    vector<int> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index,
+    vector<uint32_t> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index,
             std::vector<std::string>& id_vec) {
-        vector<int> queries;
+        vector<uint32_t> queries;
         ifstream file(filename);
         
         if (!file) {
@@ -388,8 +389,8 @@ namespace pc_mat {
     }
 
     // Read queries from stdin
-    vector<int> read_queries_from_stdin(const unordered_map<string, int>& id_to_index) {
-        vector<int> queries;
+    vector<uint32_t> read_queries_from_stdin(const unordered_map<string, int>& id_to_index) {
+        vector<uint32_t> queries;
         string line;
         
         while (getline(cin, line)) {
@@ -470,8 +471,8 @@ namespace pc_mat {
 
     vector<std::vector<uint32_t> > load_neighbors_for_slice(
         const string& matrix_folder,
-        const vector<int>& rows,
-        const vector<int>& cols,
+        const vector<uint32_t>& rows,
+        const vector<uint32_t>& cols,
         int total_vectors,
         int num_shards
     )
@@ -556,8 +557,8 @@ namespace pc_mat {
         return results;
     }
 
-    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::vector<int32_t>& row_queries_vec, 
-        std::vector<int32_t>& col_queries_vec, int32_t total_vectors,
+    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::vector<uint32_t>& row_queries_vec, 
+        std::vector<uint32_t>& col_queries_vec, int32_t total_vectors,
         std::vector<float>& vector_norms
     ){
         
@@ -591,6 +592,90 @@ namespace pc_mat {
             all_results[q] = std::move(res);
         }
         return all_results;
+    }
+
+
+    void update_matrix_for_shard(std::string matrix_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, std::vector<uint32_t>& acc_vec, std::vector<uint32_t>& new_index_to_prev_index_vec, uint32_t total_vectors_prev, uint32_t num_shards){
+
+        std::string bin_out_fn = new_shard_folder + "/matrix.bin";
+        std::ofstream bin_out(bin_out_fn, std::ios::binary);
+
+        std::string ngh_out_fn = new_shard_folder + "/neighbor_start.bin";
+        std::ofstream ngh_out(ngh_out_fn, std::ios::binary);
+
+        string index_filename = new_shard_folder + "/row_index.bin";
+        ofstream index_out(index_filename, ios::binary);
+
+        std::vector<uint64_t> curr_pos_vec;
+        std::vector<uint32_t> start_neighbor;
+        curr_pos_vec.reserve(end_row - start_row + 1);
+        start_neighbor.reserve(end_row - start_row + 1);
+        
+        std::vector<uint32_t> prev_rows;
+        prev_rows.reserve(end_row - start_row + 1);
+        for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+            prev_rows.push_back(new_index_to_prev_index_vec[row]);
+
+        }
+        auto results = load_neighbors_for_slice(matrix_folder, prev_rows, acc_vec, total_vectors_prev, num_shards);
+        for(size_t i=0; i<results.size(); i++){
+            std::vector<uint32_t> neighbor_indx_vec;
+            std::vector<uint16_t> neighbor_jaccard_vec;
+            auto result_row_vec = results[i];
+            neighbor_indx_vec.reserve(result_row_vec.size());
+            neighbor_jaccard_vec.reserve(result_row_vec.size());
+
+            for(size_t ni=0; ni<result_row_vec.size(); ni++){
+                if(result_row_vec[ni] == 0) continue;
+                neighbor_indx_vec.push_back(ni);
+                neighbor_jaccard_vec.push_back(result_row_vec[ni]);
+            }
+
+            uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
+            curr_pos_vec.push_back(current_pos);
+            if(neighbor_indx_vec.size() == 0){
+                start_neighbor.push_back(0); // will not execute at the current setup
+            }
+            else{
+                start_neighbor.push_back(neighbor_indx_vec[0]);
+            }
+
+            std::vector<uint64_t> delta_cols(neighbor_indx_vec.size());
+            for (size_t k = 1; k < neighbor_indx_vec.size(); ++k) {
+                delta_cols[k-1] = neighbor_indx_vec[k] - neighbor_indx_vec[k-1];
+            }
+            bits::compact_vector cv_jc;
+            cv_jc.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
+            cv_jc.save(bin_out);
+
+            if(neighbor_jaccard_vec.size() == 1) continue;
+
+            bits::rice_sequence<> rs_delta;
+            rs_delta.encode(delta_cols.begin(), delta_cols.size());
+            rs_delta.save(bin_out);
+
+        }
+
+        bin_out.flush();     
+        bin_out.close();
+        
+
+        std::vector<uint64_t> curr_pos_delta_vec;
+        curr_pos_delta_vec.reserve(curr_pos_vec.size());
+
+        // curr_pos_vec[0] is always 0;
+        for(size_t i=1; i<curr_pos_vec.size(); i++){
+            curr_pos_delta_vec.push_back(curr_pos_vec[i] - curr_pos_vec[i-1]);
+        }
+        bits::compact_vector cv_cps; // Compact Vector Current PositionS
+        cv_cps.build(curr_pos_delta_vec.begin(), curr_pos_delta_vec.size());
+        cv_cps.save(index_out);
+        index_out.close();
+
+        bits::rice_sequence<> new_start_nei_rs; 
+        new_start_nei_rs.encode(start_neighbor.begin(), start_neighbor.size());
+        new_start_nei_rs.save(ngh_out);
+        ngh_out.close();
     }
 
 } // namespace pc_mat

@@ -53,6 +53,8 @@ namespace pc_mat{
 
     void filter_matrix_for_shard(std::string shard_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, double filter);
 
+    void update_matrix_for_shard(std::string matrix_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, std::vector<uint32_t>& acc_vec, std::vector<uint32_t>& new_index_to_prev_index_vec, uint32_t total_vectors, uint32_t num_shards);
+
     // Load row index mapping from row_index.txt in a specific shard
     vector<pair<int, int64_t>> load_shard_row_index(const string& shard_folder) ;
 
@@ -76,11 +78,11 @@ namespace pc_mat{
     int parse_query_to_index(const string& query_str, const unordered_map<string, int>& id_to_index) ;
 
     // Read queries from file
-    vector<int> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index,
+    vector<uint32_t> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index,
                 std::vector<std::string>& id_vec) ;
 
     // Read queries from stdin
-    vector<int> read_queries_from_stdin(const unordered_map<string, int>& id_to_index) ;
+    vector<uint32_t> read_queries_from_stdin(const unordered_map<string, int>& id_to_index) ;
 
     // vector<double> compute_closest_neighbor_distance(
     //     const string& matrix_folder,
@@ -106,8 +108,8 @@ namespace pc_mat{
     std::vector<Result> query(string matrix_folder, vector<int>& queries, 
         std::vector<float>& vector_norms, std::vector<string>& identifiers);
     
-    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::vector<int32_t>& row_vec, 
-        std::vector<int32_t>& col_vec, int32_t total_vectors,
+    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::vector<uint32_t>& row_vec, 
+        std::vector<uint32_t>& col_vec, int32_t total_vectors,
         std::vector<float>& vector_norms
     );
 } // namespace pc_mat
