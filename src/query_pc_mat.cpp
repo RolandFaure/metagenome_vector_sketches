@@ -416,6 +416,67 @@ void filter_matrix(std::string matrix_folder, std::string db_folder, std::string
               << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
 }
 
+void update_matrix(std::string matrix_folder, std::string db_folder, std::string store_folder, std::string acc_list_file, int num_threads){
+    std::vector<float> vector_norms;
+    pc_mat::load_vector_norms(db_folder, vector_norms);
+
+    uint64_t total_vectors = pc_mat::get_total_vectors(db_folder);
+    uint64_t num_shards = pc_mat::discover_shards(matrix_folder);
+    uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+
+    
+    ifstream acc_in(acc_list_file);
+    if (!acc_in) {
+        cerr << "Error: Could not open " << acc_list_file << endl;
+        return;
+    }
+    std::unordered_set<std::string> acc_set;
+    int count = 0;
+    string line;
+    while (getline(acc_in, line)) {
+        
+    }
+    return count;
+
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    omp_set_num_threads(num_threads);
+
+    #pragma omp parallel for schedule(static)
+    
+    for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
+        auto shard_start = std::chrono::high_resolution_clock::now();
+        std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+        std::string new_shard_folder = store_folder + "/shard_" + std::to_string(shard_idx);
+        fs::path dir_path = new_shard_folder;
+        fs::create_directories(dir_path);
+        std::cout<<"Writing filtered matrix in "<<new_shard_folder<<std::endl;
+
+        uint64_t start_row = shard_idx * rows_per_shard;
+        uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
+
+        pc_mat::filter_matrix_for_shard(shard_folder, new_shard_folder, start_row, end_row, filter);
+        auto shard_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = shard_end - shard_start;
+        auto shard_time = get_time_unit(elapsed.count());
+        #pragma omp critical
+        {
+            std::cout << "Shard " << shard_idx
+                      << " completed in "
+                      << std::fixed << std::setprecision(2)
+                      << shard_time.first << " "
+                      << shard_time.second << '\n';
+        }
+    }
+    
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll shards completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
 
 std::string get_file_extension(std::string filename){
     size_t dot_pos = filename.find_last_of(".");
