@@ -172,6 +172,8 @@ Create a slice of the matrix (a sub-matrix) from specificed IDs in a row file (`
 ../build/query_pc_mat --matrix toy_matrix --db toy_db/  --row_file row_samples.txt --col_file col_samples.txt --write_to_file row_col.h5 --batch_size 5 --thread 2
 ```
 
+Here, use `*.h5` ([HDF5](https://www.hdfgroup.org/solutions/hdf5/)) as the output format to get the most compressed output. This format can be accessed conveniently in Python using the [h5py](https://docs.h5py.org/en/stable/) library.
+
 #### Filter Matrix
 
 Filter all accessions below a threshold from [0, 1] and write the corresponding matrix to a new location:
