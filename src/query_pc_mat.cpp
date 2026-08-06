@@ -419,6 +419,51 @@ void filter_matrix(std::string matrix_folder, std::string db_folder, std::string
 }
 
 
+
+void write_neighbor_from_matrix(std::string matrix_folder, std::string db_folder,int num_threads){
+    
+    uint64_t total_vectors = pc_mat::get_total_vectors(db_folder);
+    uint64_t num_shards = pc_mat::discover_shards(matrix_folder);
+    uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    omp_set_num_threads(num_threads);
+
+    #pragma omp parallel for schedule(static)
+    
+    for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
+        auto shard_start = std::chrono::high_resolution_clock::now();
+        std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+
+        uint64_t start_row = shard_idx * rows_per_shard;
+        uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
+        if(start_row < end_row){
+            pc_mat::save_neighbors_for_shard(shard_folder, start_row, end_row);
+        }
+            
+        auto shard_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = shard_end - shard_start;
+        auto shard_time = get_time_unit(elapsed.count());
+        #pragma omp critical
+        {
+            std::cout << "Shard " << shard_idx
+                      << " completed in "
+                      << std::fixed << std::setprecision(2)
+                      << shard_time.first << " "
+                      << shard_time.second << '\n';
+        }
+    }
+    
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll shards completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
+
 std::string get_whitespace_removed(std::string &s){
     const std::string WHITESPACE = " \n\r\t\f\v";
 
@@ -474,14 +519,15 @@ void update_matrix_from_list(std::string matrix_folder, std::string db_folder, s
 
         fs::path dir_path = new_shard_folder;
         fs::create_directories(dir_path);
+        
+        uint64_t start_row = shard_idx * rows_per_shard_new;
+        uint64_t end_row = min(start_row + rows_per_shard_new, total_vectors_new);
+
         #pragma omp critical
         {
             std::cout<<"Writing updated matrix in "<<new_shard_folder<<std::endl;
+            std::cout<<start_row<<" "<<end_row<<std::endl;
         }
-        
-
-        uint64_t start_row = shard_idx * rows_per_shard_new;
-        uint64_t end_row = min(start_row + rows_per_shard_new, total_vectors_new);
 
         if(start_row < end_row){
             pc_mat::update_matrix_for_shard(matrix_folder, new_shard_folder, start_row, end_row, acc_vec, new_index_to_prev_index_vec, total_vectors_prev, num_shards);
@@ -543,6 +589,7 @@ int main(int argc, char* argv[]) {
     bool use_row_col_files = false;
     bool use_filter = false;
     bool update_matrix = false;
+    bool save_neighbors = false;
 
     // Change this whenever the file encoding is modified
     const int encoding_version = 1;
@@ -566,6 +613,9 @@ int main(int argc, char* argv[]) {
                 clipp::option("--update").set(update_matrix) & clipp::value("folder", acc_db_folder) & 
                 clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
 
+            ) |
+            (
+                clipp::option("--nei").set(save_neighbors)
             )
 
             // | clipp::option("--stdin").set(read_from_stdin)
@@ -607,7 +657,7 @@ int main(int argc, char* argv[]) {
     if (matrix_folder.empty()) {
         show_error_and_exit("Error: matrix folder is required.");
     }
-    if(!use_query_file && !use_query_ids && !use_row_col_files && !use_filter && !update_matrix){
+    if(!use_query_file && !use_query_ids && !use_row_col_files && !use_filter && !update_matrix && !save_neighbors){
         show_error_and_exit("No specific action is given.");
     }
 
@@ -689,6 +739,9 @@ int main(int argc, char* argv[]) {
     }
     else if(update_matrix){
         update_matrix_from_list(matrix_folder, db_folder, filtered_matrix_folder, acc_db_folder, n_threads);
+    }
+    else if(save_neighbors){
+        write_neighbor_from_matrix(matrix_folder, db_folder, n_threads);
     }
     else{
         std::cerr<<"No query types specified. Aborting...\n";

@@ -73,7 +73,7 @@ void filter_and_write(
 )
 {
     const size_t block_size = 2048;               // vectors per block
-    const size_t bytes_per_vector = dimension * sizeof(int32_t);
+    const size_t bytes_per_vector = dimension * sizeof(int16_t);
 
     std::ifstream vec_in(db_folder + "vectors.bin", std::ios::binary);
     if (!vec_in) {
@@ -81,8 +81,8 @@ void filter_and_write(
         return;
     }
 
-    std::ofstream vec_out(db_folder + "non_wgs_filtered_vectors.bin", std::ios::binary);
-    std::ofstream meta_out(db_folder + "non_wgs_filtered_sample_norm.txt");
+    std::ofstream vec_out(db_folder + "filtered_vectors.bin", std::ios::binary);
+    std::ofstream meta_out(db_folder + "filtered_vector_norms.txt");
 
     if (!vec_out || !meta_out) {
         std::cerr << "Failed to open output files\n";
@@ -99,7 +99,7 @@ void filter_and_write(
         size_t num_vectors = end - begin;
 
         // contiguous block buffer
-        std::vector<int32_t> buffer(num_vectors * dimension);
+        std::vector<int16_t> buffer(num_vectors * dimension);
 
         vec_in.read(reinterpret_cast<char*>(buffer.data()),
                     num_vectors * bytes_per_vector);
@@ -116,11 +116,11 @@ void filter_and_write(
 
             if (sample_norm_vec[global_i].second == 0)
                 continue;
-            if(wgs_set.count(sample_norm_vec[global_i].first) != 0) continue;
+            if(wgs_set.count(sample_norm_vec[global_i].first) == 0) continue;
             if(sample_norm_vec[global_i].first == "human_genome_sketches_merged") continue;
 
             // pointer to this vector inside the block
-            int32_t* vec_ptr = buffer.data() + i * dimension;
+            int16_t* vec_ptr = buffer.data() + i * dimension;
             vector<int16_t> updated_vector(dimension);
             for(size_t i=0; i<dimension; i++){
                 if(vec_ptr[i] > (int)std::numeric_limits<std::int16_t>::max() || 
@@ -195,7 +195,12 @@ void read_and_filter_vec(std::string &db_folder, std::string &wgs_file){
 int main(int argc, char* argv[]) {
     std::string db_folder = argv[1];
     std::string wgs_file = argv[2];
+
+    auto start_time = std::chrono::high_resolution_clock::now();
     read_and_filter_vec(db_folder, wgs_file);
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::seconds>(end_time - start_time);
+    std::cout<<"Completed in "<<duration.count()<<" seconds";
 
     return 0;
 }

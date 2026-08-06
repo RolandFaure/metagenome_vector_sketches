@@ -343,6 +343,33 @@ namespace pc_mat {
         ngh_out.close();
     }
 
+    void save_neighbors_for_shard(std::string shard_folder, uint64_t start_row, uint64_t end_row){
+        // uint32_t threshold = round(filter * MULT_CONST); //everything below and equal to threshold will be skipped
+        
+        const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
+                start_row);
+        
+        std::string bin_fn = shard_folder + "/matrix.bin";
+        std::ifstream bin_in(bin_fn, std::ios::binary);
+
+        string ngh_count_fn = shard_folder + "/neighbor_count.txt";
+        ofstream nc_out(ngh_count_fn);
+
+        
+        for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+            auto indx_addr = row_to_indx_add_map.at(row); // do not need this
+            auto curr_idx = indx_addr.first; // 0 to end_row - start_row
+            auto curr_addr = indx_addr.second;
+
+            bin_in.clear();
+            bin_in.seekg(curr_addr, std::ios::beg);
+
+            bits::compact_vector cv_jc;
+            cv_jc.load(bin_in);
+            nc_out<<cv_jc.size()<<"\n";
+        }
+    }
+
 
     // Convert query string to index (supports both numeric indices and identifiers)
     int parse_query_to_index(const string& query_str, const unordered_map<string, int>& id_to_index) {
@@ -611,50 +638,66 @@ namespace pc_mat {
         curr_pos_vec.reserve(end_row - start_row + 1);
         start_neighbor.reserve(end_row - start_row + 1);
         
-        std::vector<uint32_t> prev_rows;
-        prev_rows.reserve(end_row - start_row + 1);
-        for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
-            prev_rows.push_back(new_index_to_prev_index_vec[row]);
+        // std::vector<uint32_t> prev_rows;
+        // prev_rows.reserve(end_row - start_row + 1);
+        // for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+        //     prev_rows.push_back(new_index_to_prev_index_vec[row]);
+        // }
 
-        }
-        auto results = load_neighbors_for_slice(matrix_folder, prev_rows, acc_vec, total_vectors_prev, num_shards);
-        for(size_t i=0; i<results.size(); i++){
-            std::vector<uint32_t> neighbor_indx_vec;
-            std::vector<uint16_t> neighbor_jaccard_vec;
-            const auto& result_row_vec = results[i];
-            neighbor_indx_vec.reserve(result_row_vec.size());
-            neighbor_jaccard_vec.reserve(result_row_vec.size());
+        constexpr size_t CHUNK_SIZE = 512;
+        for (uint64_t chunk_begin = start_row;
+            chunk_begin < end_row;
+            chunk_begin += CHUNK_SIZE)
+        {
+            uint64_t chunk_end = std::min(chunk_begin + CHUNK_SIZE, end_row);
 
-            for(size_t ni=0; ni<result_row_vec.size(); ni++){
-                if(result_row_vec[ni] == 0) continue;
-                neighbor_indx_vec.push_back(ni);
-                neighbor_jaccard_vec.push_back(result_row_vec[ni]);
+            std::vector<uint32_t> prev_rows;
+            prev_rows.reserve(chunk_end - chunk_begin);
+
+            for (uint64_t row = chunk_begin; row < chunk_end; ++row) {
+                prev_rows.push_back(new_index_to_prev_index_vec[row]);
             }
+        
 
-            uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
-            curr_pos_vec.push_back(current_pos);
-            if(neighbor_indx_vec.size() == 0){
-                start_neighbor.push_back(0); // will not execute at the current setup
+            auto results = load_neighbors_for_slice(matrix_folder, prev_rows, acc_vec, total_vectors_prev, num_shards);
+            for(size_t i=0; i<results.size(); i++){
+                std::vector<uint32_t> neighbor_indx_vec;
+                std::vector<uint16_t> neighbor_jaccard_vec;
+                const auto& result_row_vec = results[i];
+                neighbor_indx_vec.reserve(result_row_vec.size());
+                neighbor_jaccard_vec.reserve(result_row_vec.size());
+
+                for(size_t ni=0; ni<result_row_vec.size(); ni++){
+                    if(result_row_vec[ni] == 0) continue;
+                    neighbor_indx_vec.push_back(ni);
+                    neighbor_jaccard_vec.push_back(result_row_vec[ni]);
+                }
+
+                uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
+                curr_pos_vec.push_back(current_pos);
+                if(neighbor_indx_vec.size() == 0){
+                    start_neighbor.push_back(0); // will not execute at the current setup
+                }
+                else{
+                    start_neighbor.push_back(neighbor_indx_vec[0]);
+                }
+
+                std::vector<uint64_t> delta_cols;
+                delta_cols.reserve(neighbor_indx_vec.size());
+                for (size_t k = 1; k < neighbor_indx_vec.size(); ++k) {
+                    delta_cols.push_back(neighbor_indx_vec[k] - neighbor_indx_vec[k-1]);
+                }
+                bits::compact_vector cv_jc;
+                cv_jc.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
+                cv_jc.save(bin_out);
+
+                if(neighbor_jaccard_vec.size() == 1) continue;
+
+                bits::rice_sequence<> rs_delta;
+                rs_delta.encode(delta_cols.begin(), delta_cols.size());
+                rs_delta.save(bin_out);
+
             }
-            else{
-                start_neighbor.push_back(neighbor_indx_vec[0]);
-            }
-
-            std::vector<uint64_t> delta_cols;
-            delta_cols.reserve(neighbor_indx_vec.size());
-            for (size_t k = 1; k < neighbor_indx_vec.size(); ++k) {
-                delta_cols.push_back(neighbor_indx_vec[k] - neighbor_indx_vec[k-1]);
-            }
-            bits::compact_vector cv_jc;
-            cv_jc.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
-            cv_jc.save(bin_out);
-
-            if(neighbor_jaccard_vec.size() == 1) continue;
-
-            bits::rice_sequence<> rs_delta;
-            rs_delta.encode(delta_cols.begin(), delta_cols.size());
-            rs_delta.save(bin_out);
-
         }
 
         bin_out.flush();     
