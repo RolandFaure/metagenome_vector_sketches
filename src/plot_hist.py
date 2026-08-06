@@ -18,7 +18,7 @@ def get_list(matrix_path):
             #     no_neighbors+=1
             # elif num_of_neighbors == 2:
             #     one_neighbor += 1
-
+    
     print("total accessions: ", len(neighbor_list))
     # print(f"No neighbors: {no_neighbors}")
     # print(f"Only one neighbor: {one_neighbor}")

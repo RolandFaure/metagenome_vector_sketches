@@ -55,6 +55,8 @@ namespace pc_mat{
 
     void update_matrix_for_shard(std::string matrix_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, std::vector<uint32_t>& acc_vec, std::vector<uint32_t>& new_index_to_prev_index_vec, uint32_t total_vectors, uint32_t num_shards);
 
+    void store_only_top_n_matrix_for_shard(std::string shard_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, uint64_t num_acc);
+
     void save_neighbors_for_shard(std::string shard_folder, uint64_t start_row, uint64_t end_row);
     // Load row index mapping from row_index.txt in a specific shard
     vector<pair<int, int64_t>> load_shard_row_index(const string& shard_folder) ;
