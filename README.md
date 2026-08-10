@@ -21,7 +21,7 @@ You can use conda to install the dependencies:
 ```shell
 conda create -n mgs python=3.12
 conda activate mgs
-conda install -c conda-forge hdf5 h5py
+conda install -c conda-forge hdf5 h5py cmake
 ```
 
 ### Build the Executables
