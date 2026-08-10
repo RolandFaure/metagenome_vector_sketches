@@ -29,7 +29,6 @@ conda install -c conda-forge hdf5 h5py
 Create a build folder, and compile the C++ code using cmake. This step generates all necessary executables inside the build folder.
 
 ```Shell
-cd metagenome_vector_sketches
 mkdir build
 cd build
 cmake ..      
