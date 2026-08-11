@@ -564,6 +564,49 @@ void write_neighbor_from_matrix(std::string matrix_folder, std::string db_folder
               << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
 }
 
+void write_jaccard_estimates(std::string matrix_folder, std::string db_folder,int num_threads){
+    
+    uint64_t total_vectors = pc_mat::get_total_vectors(db_folder);
+    uint64_t num_shards = pc_mat::discover_shards(matrix_folder);
+    uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    omp_set_num_threads(num_threads);
+
+    #pragma omp parallel for schedule(static)
+    
+    for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
+        auto shard_start = std::chrono::high_resolution_clock::now();
+        std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+
+        uint64_t start_row = shard_idx * rows_per_shard;
+        uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
+        if(start_row < end_row){
+            pc_mat::write_jaccard_for_shard(shard_folder, start_row, end_row);
+        }
+            
+        auto shard_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = shard_end - shard_start;
+        auto shard_time = get_time_unit(elapsed.count());
+        #pragma omp critical
+        {
+            std::cout << "Shard " << shard_idx
+                      << " completed in "
+                      << std::fixed << std::setprecision(2)
+                      << shard_time.first << " "
+                      << shard_time.second << '\n';
+        }
+    }
+    
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll shards completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
 
 std::string get_whitespace_removed(std::string &s){
     const std::string WHITESPACE = " \n\r\t\f\v";
@@ -694,6 +737,7 @@ int main(int argc, char* argv[]) {
     bool save_neighbors = false;
     bool only_top_neighbors = false;
     bool only_topn_wfil = false;
+    bool count_jaccard = false;
 
     // Change this whenever the file encoding is modified
     const int encoding_version = 1;
@@ -728,6 +772,9 @@ int main(int argc, char* argv[]) {
             (
                 clipp::option("--nei_fil").set(only_topn_wfil) & clipp::value("uint64_t", num_acc) & clipp::value("double", filter) & 
                 clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
+            ) |
+            (
+                clipp::option("--count").set(count_jaccard)
             )
 
             // | clipp::option("--stdin").set(read_from_stdin)
@@ -769,7 +816,7 @@ int main(int argc, char* argv[]) {
     if (matrix_folder.empty()) {
         show_error_and_exit("Error: matrix folder is required.");
     }
-    if(!use_query_file && !use_query_ids && !use_row_col_files && !use_filter && !update_matrix && !save_neighbors && !only_top_neighbors && !only_topn_wfil){
+    if(!use_query_file && !use_query_ids && !use_row_col_files && !use_filter && !update_matrix && !save_neighbors && !only_top_neighbors && !only_topn_wfil && !count_jaccard){
         show_error_and_exit("No specific action is given.");
     }
 
@@ -858,8 +905,11 @@ int main(int argc, char* argv[]) {
     else if(only_top_neighbors){
         store_only_top_n_matrix(matrix_folder, db_folder, filtered_matrix_folder, num_acc, n_threads);
     }
-     else if(only_topn_wfil){
+    else if(only_topn_wfil){
         store_only_top_n_wfil_matrix(matrix_folder, db_folder, filtered_matrix_folder, num_acc, filter, n_threads);
+    }
+    else if(count_jaccard){
+        write_jaccard_estimates(matrix_folder, db_folder, n_threads);
     }
     else{
         std::cerr<<"No query types specified. Aborting...\n";

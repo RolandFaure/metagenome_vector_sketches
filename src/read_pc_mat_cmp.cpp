@@ -660,6 +660,38 @@ namespace pc_mat {
         }
     }
 
+    void write_jaccard_for_shard(std::string shard_folder, uint64_t start_row, uint64_t end_row){
+        const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
+                start_row);
+        
+        std::string bin_fn = shard_folder + "/matrix.bin";
+        std::ifstream bin_in(bin_fn, std::ios::binary);
+
+        string jc_fn = shard_folder + "/jaccard_list.txt";
+        ofstream jc_out(jc_fn);
+        
+        std::vector<uint32_t> jaccard_vec(300, 0);
+
+        for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+            auto indx_addr = row_to_indx_add_map.at(row); // do not need this
+            auto curr_idx = indx_addr.first; // 0 to end_row - start_row
+            auto curr_addr = indx_addr.second;
+
+            bin_in.clear();
+            bin_in.seekg(curr_addr, std::ios::beg);
+
+            bits::compact_vector cv_jc;
+            cv_jc.load(bin_in);
+            for(size_t i=0; i<cv_jc.size(); i++){
+                jaccard_vec[cv_jc.access(i)]++;
+            }
+        }
+        for(size_t i=0; i<256; i++){
+            jc_out<<jaccard_vec[i]<<"\n";
+        }
+        jc_out.close();
+    }
+
 
     // Convert query string to index (supports both numeric indices and identifiers)
     int parse_query_to_index(const string& query_str, const unordered_map<string, int>& id_to_index) {
