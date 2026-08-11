@@ -61,8 +61,8 @@ namespace pc_mat{
 
     void save_neighbors_for_shard(std::string shard_folder, uint64_t start_row, uint64_t end_row);
 
-    void write_jaccard_for_shard(std::string shard_folder, uint64_t start_row, uint64_t end_row);
-    
+    void write_jaccard_for_shard(std::string shard_folder,  std::string new_shard_folder,  uint64_t start_row, uint64_t end_row);
+
     // Load row index mapping from row_index.txt in a specific shard
     vector<pair<int, int64_t>> load_shard_row_index(const string& shard_folder) ;
 

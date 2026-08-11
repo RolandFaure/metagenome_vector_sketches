@@ -660,14 +660,14 @@ namespace pc_mat {
         }
     }
 
-    void write_jaccard_for_shard(std::string shard_folder, uint64_t start_row, uint64_t end_row){
+    void write_jaccard_for_shard(std::string shard_folder,  std::string new_shard_folder,  uint64_t start_row, uint64_t end_row){
         const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
                 start_row);
         
         std::string bin_fn = shard_folder + "/matrix.bin";
         std::ifstream bin_in(bin_fn, std::ios::binary);
 
-        string jc_fn = shard_folder + "/jaccard_list.txt";
+        string jc_fn = new_shard_folder + "/jaccard_list.txt";
         ofstream jc_out(jc_fn);
         
         std::vector<uint32_t> jaccard_vec(300, 0);

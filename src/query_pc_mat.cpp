@@ -564,7 +564,7 @@ void write_neighbor_from_matrix(std::string matrix_folder, std::string db_folder
               << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
 }
 
-void write_jaccard_estimates(std::string matrix_folder, std::string db_folder,int num_threads){
+void write_jaccard_estimates(std::string matrix_folder, std::string db_folder, std::string store_folder, int num_threads){
     
     uint64_t total_vectors = pc_mat::get_total_vectors(db_folder);
     uint64_t num_shards = pc_mat::discover_shards(matrix_folder);
@@ -579,11 +579,14 @@ void write_jaccard_estimates(std::string matrix_folder, std::string db_folder,in
     for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
         auto shard_start = std::chrono::high_resolution_clock::now();
         std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
-
+        std::string new_shard_folder = store_folder + "/shard_" + std::to_string(shard_idx);
+        fs::path dir_path = new_shard_folder;
+        fs::create_directories(dir_path);
+        
         uint64_t start_row = shard_idx * rows_per_shard;
         uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
         if(start_row < end_row){
-            pc_mat::write_jaccard_for_shard(shard_folder, start_row, end_row);
+            pc_mat::write_jaccard_for_shard(shard_folder, new_shard_folder, start_row, end_row);
         }
             
         auto shard_end = std::chrono::high_resolution_clock::now();
@@ -774,7 +777,8 @@ int main(int argc, char* argv[]) {
                 clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
             ) |
             (
-                clipp::option("--count").set(count_jaccard)
+                clipp::option("--count").set(count_jaccard) & 
+                clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
             )
 
             // | clipp::option("--stdin").set(read_from_stdin)
@@ -909,7 +913,7 @@ int main(int argc, char* argv[]) {
         store_only_top_n_wfil_matrix(matrix_folder, db_folder, filtered_matrix_folder, num_acc, filter, n_threads);
     }
     else if(count_jaccard){
-        write_jaccard_estimates(matrix_folder, db_folder, n_threads);
+        write_jaccard_estimates(matrix_folder, db_folder, filtered_matrix_folder, n_threads);
     }
     else{
         std::cerr<<"No query types specified. Aborting...\n";

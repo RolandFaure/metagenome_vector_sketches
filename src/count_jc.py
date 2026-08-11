@@ -27,20 +27,23 @@ def get_dict(matrix_path):
 
 
 def plot_hist(val_dict, marker):
-    # with open('jaccard_count.txt', 'w') as f:
-    #     for (key,val) in val_dict.items():
-    #         f.write(f'{key} {val}\n')
-    val_list = list(val_dict.values())
-    jc_list = list(val_dict.keys())
-    fig,ax = plt.subplots(figsize=(10, 6))
-    ax.bar(jc_list, val_list,  edgecolor='black', color='skyblue')
-    ax.set_xlabel('Jaccard Estimates')
-    ax.set_ylabel('Frequency (log-scale)')
-    ax.set_yscale('log')
-    # ax.set_title(f'Includes neighbors with Jaccard >= {cut_off}')
-    out_fn = f'jaccard_dist.pdf'
-    fig.savefig(out_fn, dpi=300)
-    print('Figure saved to: '+out_fn)
+    fn = 'jaccard_count.txt'
+    with open(fn, 'w') as f:
+        for (key,val) in val_dict.items():
+            f.write(f'{key} {val}\n')
+    print(f'Count saved to {fn}')
+    # val_list = list(val_dict.values())
+    # jc_list = list(val_dict.keys())
+    # fig,ax = plt.subplots(figsize=(10, 6))
+    # ax.bar(jc_list, val_list,  edgecolor='black', color='skyblue')
+    # # ax.hist(val_list, bins=256,  edgecolor='black', color='skyblue')
+    # ax.set_xlabel('Jaccard Estimates')
+    # ax.set_ylabel('Frequency (log-scale)')
+    # ax.set_yscale('log')
+    # # ax.set_title(f'Includes neighbors with Jaccard >= {cut_off}')
+    # out_fn = f'jaccard_dist.pdf'
+    # fig.savefig(out_fn, dpi=300)
+    # print('Figure saved to: '+out_fn)
     
     
 
