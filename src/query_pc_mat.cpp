@@ -752,34 +752,35 @@ int main(int argc, char* argv[]) {
             (clipp::option("--query_file").set(use_query_file) & clipp::value("file", query_file)) |
             (clipp::option("--query_ids").set(use_query_ids) & clipp::values("ids", query_ids_str)) |
             (
-            clipp::option("--row_file").set(use_row_col_files) & clipp::value("row", row_file) &
-            clipp::option("--col_file") & clipp::value("col", col_file)
+                clipp::option("--row_file").set(use_row_col_files) & clipp::value("row", row_file) &
+                clipp::option("--col_file") & clipp::value("col", col_file)
             ) |
             (
-                clipp::option("--filter").set(use_filter) & clipp::value("double", filter) & 
+                clipp::option("--nf").set(only_topn_wfil) & clipp::value("uint64_t", num_acc) & clipp::value("double", filter) & 
                 clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
+            ) 
+            // |
+            // (
+            //     clipp::option("--filter").set(use_filter) & clipp::value("double", filter) & 
+            //     clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
 
-            ) |
-            (
-                clipp::option("--update").set(update_matrix) & clipp::value("folder", acc_db_folder) & 
-                clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
+            // ) |
+            // (
+            //     clipp::option("--update").set(update_matrix) & clipp::value("folder", acc_db_folder) & 
+            //     clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
 
-            ) |
-            (
-                clipp::option("--nei").set(save_neighbors)
-            ) |
-            (
-                clipp::option("--only").set(only_top_neighbors) & clipp::value("uint64_t", num_acc) & 
-                clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
-            ) |
-            (
-                clipp::option("--nei_fil").set(only_topn_wfil) & clipp::value("uint64_t", num_acc) & clipp::value("double", filter) & 
-                clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
-            ) |
-            (
-                clipp::option("--count").set(count_jaccard) & 
-                clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
-            )
+            // ) |
+            // (
+            //     clipp::option("--nei").set(save_neighbors)
+            // ) |
+            // (
+            //     clipp::option("--only").set(only_top_neighbors) & clipp::value("uint64_t", num_acc) & 
+            //     clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
+            // ) |
+            // (
+            //     clipp::option("--count").set(count_jaccard) & 
+            //     clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
+            // )
 
             // | clipp::option("--stdin").set(read_from_stdin)
         ),
@@ -803,7 +804,7 @@ int main(int argc, char* argv[]) {
         cout << "  --row_file      : File containing query row IDs (one per line)\n";
         cout << "  --col_file      : File containing query col IDs (one per line)\n";
         cout << "  --filter        : Filter values below threshold from matrix\n";
-        cout << "  --update        : Update matrix from the provided accession db folder\n";
+        cout << "  --nf            : Filter matrix to include at least top N neighbors and all neighbors with Jaccard >= J\n";
         cout << "  --out           : Output folder for the filtered matrix\n";
         cout << "  --top           : Number of top jaccard values to show [default 10]\n";
         cout << "  --batch_size    : Number of queries to process per batch [default 1000]\n";
