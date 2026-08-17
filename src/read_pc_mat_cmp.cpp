@@ -343,6 +343,356 @@ namespace pc_mat {
         ngh_out.close();
     }
 
+    void store_only_top_n_matrix_for_shard(std::string shard_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, uint64_t num_acc){
+        // uint32_t threshold = round(filter * MULT_CONST); //everything below and equal to threshold will be skipped
+        
+        const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
+                start_row);
+        
+        std::string bin_fn = shard_folder + "/matrix.bin";
+        std::ifstream bin_in(bin_fn, std::ios::binary);
+
+        std::string bin_out_fn = new_shard_folder + "/matrix.bin";
+        std::ofstream bin_out(bin_out_fn, std::ios::binary);
+
+        std::string ngh_fn = shard_folder + "/neighbor_start.bin";
+        std::ifstream ngh_in(ngh_fn, std::ios::binary);
+        
+        std::string ngh_out_fn = new_shard_folder + "/neighbor_start.bin";
+        std::ofstream ngh_out(ngh_out_fn, std::ios::binary);
+
+        string index_filename = new_shard_folder + "/row_index.bin";
+        ofstream index_out(index_filename, ios::binary);
+
+        // string ngh_list_fn = new_shard_folder + "/neighbor_list.txt";
+        // ofstream ngh_list_out(ngh_list_fn);
+
+        bits::rice_sequence<> rs_start;
+        rs_start.load(ngh_in);
+        ngh_in.close();
+
+        std::vector<uint64_t> curr_pos_vec;
+        std::vector<uint32_t> start_neighbor;
+        curr_pos_vec.reserve(end_row - start_row + 1);
+        start_neighbor.reserve(rs_start.size());
+        
+        for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+            auto indx_addr = row_to_indx_add_map.at(row); // do not need this
+            auto curr_idx = indx_addr.first; // 0 to end_row - start_row
+            auto curr_addr = indx_addr.second;
+
+            bin_in.clear();
+            bin_in.seekg(curr_addr, std::ios::beg);
+
+            bits::compact_vector cv_jc;
+            cv_jc.load(bin_in);
+            
+            bits::rice_sequence<> rs_delta;
+            
+            if(cv_jc.size() > 1) rs_delta.load(bin_in);
+            
+            uint64_t number_of_neighbors = cv_jc.size();
+            std::vector<std::pair<uint32_t, uint16_t> > neighbor_indx_jc_vec;
+            neighbor_indx_jc_vec.reserve(cv_jc.size());
+            
+            auto neighbor_index = rs_start.access(curr_idx);
+            auto similarity = cv_jc.access(0);
+            neighbor_indx_jc_vec.push_back(std::make_pair(neighbor_index, similarity));
+
+            for(int i=1; i<number_of_neighbors; i++){
+                auto similarity = cv_jc.access(i);
+                neighbor_index +=  rs_delta.access(i-1);
+                neighbor_indx_jc_vec.push_back(std::make_pair(neighbor_index, similarity));
+            }
+
+            uint64_t num_nbrs_to_wrt = std::min<uint64_t>(
+                neighbor_indx_jc_vec.size(), num_acc);
+
+            // Keep only the top N by similarity
+            std::partial_sort(
+                neighbor_indx_jc_vec.begin(),
+                neighbor_indx_jc_vec.begin() + num_nbrs_to_wrt,
+                neighbor_indx_jc_vec.end(),
+                [](const auto& a, const auto& b) {
+                    return a.second > b.second;
+                });
+
+            neighbor_indx_jc_vec.resize(num_nbrs_to_wrt);
+
+            // Restore ascending neighbor-id order for delta encoding
+            std::sort(
+                neighbor_indx_jc_vec.begin(),
+                neighbor_indx_jc_vec.end(),
+                [](const auto& a, const auto& b) {
+                    return a.first < b.first;
+                });
+
+            start_neighbor.emplace_back(neighbor_indx_jc_vec[0].first);
+            
+            std::vector<uint64_t> delta_cols;
+            std::vector<uint16_t> neighbor_jaccard_vec;
+            delta_cols.reserve(num_nbrs_to_wrt);
+            neighbor_jaccard_vec.reserve(num_nbrs_to_wrt);
+
+            neighbor_jaccard_vec.push_back(neighbor_indx_jc_vec[0].second);
+            for(size_t i=1; i<num_nbrs_to_wrt; i++){
+                delta_cols.push_back(neighbor_indx_jc_vec[i].first -            neighbor_indx_jc_vec[i-1].first);
+                neighbor_jaccard_vec.push_back(neighbor_indx_jc_vec[i].second);
+            }
+            
+            uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
+            curr_pos_vec.emplace_back(current_pos);
+
+            bits::compact_vector cv_jc_out;
+            cv_jc_out.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
+            cv_jc_out.save(bin_out);
+            
+            assert(neighbor_jaccard_vec.size() >= 1);
+
+            // ngh_list_out<<neighbor_indx_vec.size()<<std::endl;
+            
+            if(neighbor_jaccard_vec.size() == 1) continue;
+            
+            bits::rice_sequence<> rs_delta_out;
+            rs_delta_out.encode(delta_cols.begin(), delta_cols.size());
+            rs_delta_out.save(bin_out);
+        }
+        bin_out.flush();     
+        bin_out.close();
+
+        std::vector<uint64_t> curr_pos_delta_vec(curr_pos_vec.size()-1);
+        // curr_pos_vec[0] is always 0;
+        for(size_t i=1; i<curr_pos_vec.size(); i++){
+            curr_pos_delta_vec[i-1] = curr_pos_vec[i] - curr_pos_vec[i-1];
+        }
+        bits::compact_vector cv_cps; // Compact Vector Current PositionS
+        cv_cps.build(curr_pos_delta_vec.begin(), curr_pos_delta_vec.size());
+        cv_cps.save(index_out);
+        index_out.close();
+
+        bits::rice_sequence<> new_start_nei_rs; 
+        new_start_nei_rs.encode(start_neighbor.begin(), start_neighbor.size());
+        new_start_nei_rs.save(ngh_out);
+        ngh_out.close();
+    }
+
+    void store_only_top_n_wfil_matrix_for_shard(std::string shard_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, uint64_t num_acc, double filter){
+        // uint32_t threshold = round(filter * MULT_CONST); //everything below and equal to threshold will be skipped
+        
+        const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
+                start_row);
+        
+        std::string bin_fn = shard_folder + "/matrix.bin";
+        std::ifstream bin_in(bin_fn, std::ios::binary);
+
+        std::string bin_out_fn = new_shard_folder + "/matrix.bin";
+        std::ofstream bin_out(bin_out_fn, std::ios::binary);
+
+        std::string ngh_fn = shard_folder + "/neighbor_start.bin";
+        std::ifstream ngh_in(ngh_fn, std::ios::binary);
+        
+        std::string ngh_out_fn = new_shard_folder + "/neighbor_start.bin";
+        std::ofstream ngh_out(ngh_out_fn, std::ios::binary);
+
+        string index_filename = new_shard_folder + "/row_index.bin";
+        ofstream index_out(index_filename, ios::binary);
+
+        // string ngh_list_fn = new_shard_folder + "/neighbor_list.txt";
+        // ofstream ngh_list_out(ngh_list_fn);
+
+        bits::rice_sequence<> rs_start;
+        rs_start.load(ngh_in);
+        ngh_in.close();
+
+        std::vector<uint64_t> curr_pos_vec;
+        std::vector<uint32_t> start_neighbor;
+        curr_pos_vec.reserve(end_row - start_row + 1);
+        start_neighbor.reserve(rs_start.size());
+        
+        for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+            auto indx_addr = row_to_indx_add_map.at(row); // do not need this
+            auto curr_idx = indx_addr.first; // 0 to end_row - start_row
+            auto curr_addr = indx_addr.second;
+
+            bin_in.clear();
+            bin_in.seekg(curr_addr, std::ios::beg);
+
+            bits::compact_vector cv_jc;
+            cv_jc.load(bin_in);
+            
+            bits::rice_sequence<> rs_delta;
+            
+            if(cv_jc.size() > 1) rs_delta.load(bin_in);
+            
+            uint64_t number_of_neighbors = cv_jc.size();
+            std::vector<std::pair<uint32_t, uint16_t> > neighbor_indx_jc_vec;
+            neighbor_indx_jc_vec.reserve(cv_jc.size());
+            
+            auto neighbor_index = rs_start.access(curr_idx);
+            auto similarity = cv_jc.access(0);
+            neighbor_indx_jc_vec.push_back(std::make_pair(neighbor_index, similarity));
+
+            for(int i=1; i<number_of_neighbors; i++){
+                auto similarity = cv_jc.access(i);
+                neighbor_index +=  rs_delta.access(i-1);
+                neighbor_indx_jc_vec.push_back(std::make_pair(neighbor_index, similarity));
+            }
+
+            uint64_t keep = std::min<uint64_t>(num_acc, neighbor_indx_jc_vec.size());
+
+            if (keep < neighbor_indx_jc_vec.size()) {
+
+                std::nth_element(
+                    neighbor_indx_jc_vec.begin(),
+                    neighbor_indx_jc_vec.begin() + keep - 1,
+                    neighbor_indx_jc_vec.end(),
+                    [](const auto& a, const auto& b) {
+                        return a.second > b.second;
+                    });
+
+                const uint16_t cutoff_similarity =
+                    neighbor_indx_jc_vec[keep - 1].second;
+
+                std::vector<std::pair<uint32_t,uint16_t>> kept;
+                kept.reserve(keep + 2048);   // grows if needed
+
+                kept.insert(
+                    kept.end(),
+                    neighbor_indx_jc_vec.begin(),
+                    neighbor_indx_jc_vec.begin() + keep);
+
+                for (size_t i = keep; i < neighbor_indx_jc_vec.size(); ++i) {
+                    uint16_t sim = neighbor_indx_jc_vec[i].second;
+                    double jc = static_cast<double>(sim)/pc_mat::MULT_CONST;
+
+                    if (sim == cutoff_similarity ||
+                        jc >= filter) {
+                        kept.push_back(neighbor_indx_jc_vec[i]);
+                    }
+                }
+
+                neighbor_indx_jc_vec.swap(kept);
+            }
+
+            uint64_t num_nbrs_to_wrt = neighbor_indx_jc_vec.size();
+
+            // Restore ascending neighbor-id order for delta encoding
+            std::sort(
+                neighbor_indx_jc_vec.begin(),
+                neighbor_indx_jc_vec.end(),
+                [](const auto& a, const auto& b) {
+                    return a.first < b.first;
+                });
+
+            start_neighbor.emplace_back(neighbor_indx_jc_vec[0].first);
+            
+            std::vector<uint64_t> delta_cols;
+            std::vector<uint16_t> neighbor_jaccard_vec;
+            delta_cols.reserve(num_nbrs_to_wrt);
+            neighbor_jaccard_vec.reserve(num_nbrs_to_wrt);
+
+            neighbor_jaccard_vec.push_back(neighbor_indx_jc_vec[0].second);
+            for(size_t i=1; i<num_nbrs_to_wrt; i++){
+                delta_cols.push_back(neighbor_indx_jc_vec[i].first -            neighbor_indx_jc_vec[i-1].first);
+                neighbor_jaccard_vec.push_back(neighbor_indx_jc_vec[i].second);
+            }
+            
+            uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
+            curr_pos_vec.emplace_back(current_pos);
+
+            bits::compact_vector cv_jc_out;
+            cv_jc_out.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
+            cv_jc_out.save(bin_out);
+            
+            assert(neighbor_jaccard_vec.size() >= 1);
+
+            // ngh_list_out<<neighbor_indx_vec.size()<<std::endl;
+            
+            if(neighbor_jaccard_vec.size() == 1) continue;
+            
+            bits::rice_sequence<> rs_delta_out;
+            rs_delta_out.encode(delta_cols.begin(), delta_cols.size());
+            rs_delta_out.save(bin_out);
+        }
+        bin_out.flush();     
+        bin_out.close();
+
+        std::vector<uint64_t> curr_pos_delta_vec(curr_pos_vec.size()-1);
+        // curr_pos_vec[0] is always 0;
+        for(size_t i=1; i<curr_pos_vec.size(); i++){
+            curr_pos_delta_vec[i-1] = curr_pos_vec[i] - curr_pos_vec[i-1];
+        }
+        bits::compact_vector cv_cps; // Compact Vector Current PositionS
+        cv_cps.build(curr_pos_delta_vec.begin(), curr_pos_delta_vec.size());
+        cv_cps.save(index_out);
+        index_out.close();
+
+        bits::rice_sequence<> new_start_nei_rs; 
+        new_start_nei_rs.encode(start_neighbor.begin(), start_neighbor.size());
+        new_start_nei_rs.save(ngh_out);
+        ngh_out.close();
+    }
+
+    void save_neighbors_for_shard(std::string shard_folder, uint64_t start_row, uint64_t end_row){
+        // uint32_t threshold = round(filter * MULT_CONST); //everything below and equal to threshold will be skipped
+        
+        const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
+                start_row);
+        
+        std::string bin_fn = shard_folder + "/matrix.bin";
+        std::ifstream bin_in(bin_fn, std::ios::binary);
+
+        string ngh_count_fn = shard_folder + "/neighbor_count.txt";
+        ofstream nc_out(ngh_count_fn);
+
+        
+        for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+            auto indx_addr = row_to_indx_add_map.at(row); // do not need this
+            auto curr_idx = indx_addr.first; // 0 to end_row - start_row
+            auto curr_addr = indx_addr.second;
+
+            bin_in.clear();
+            bin_in.seekg(curr_addr, std::ios::beg);
+
+            bits::compact_vector cv_jc;
+            cv_jc.load(bin_in);
+            nc_out<<cv_jc.size()<<"\n";
+        }
+    }
+
+    void write_jaccard_for_shard(std::string shard_folder,  std::string new_shard_folder,  uint64_t start_row, uint64_t end_row){
+        const std::unordered_map<uint32_t, std::pair<uint32_t, uint64_t>>& row_to_indx_add_map = get_shard_row_to_address_map(shard_folder, 
+                start_row);
+        
+        std::string bin_fn = shard_folder + "/matrix.bin";
+        std::ifstream bin_in(bin_fn, std::ios::binary);
+
+        string jc_fn = new_shard_folder + "/jaccard_list.txt";
+        ofstream jc_out(jc_fn);
+        
+        std::vector<uint32_t> jaccard_vec(300, 0);
+
+        for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+            auto indx_addr = row_to_indx_add_map.at(row); // do not need this
+            auto curr_idx = indx_addr.first; // 0 to end_row - start_row
+            auto curr_addr = indx_addr.second;
+
+            bin_in.clear();
+            bin_in.seekg(curr_addr, std::ios::beg);
+
+            bits::compact_vector cv_jc;
+            cv_jc.load(bin_in);
+            for(size_t i=0; i<cv_jc.size(); i++){
+                jaccard_vec[cv_jc.access(i)]++;
+            }
+        }
+        for(size_t i=0; i<256; i++){
+            jc_out<<jaccard_vec[i]<<"\n";
+        }
+        jc_out.close();
+    }
+
+
     // Convert query string to index (supports both numeric indices and identifiers)
     int parse_query_to_index(const string& query_str, const unordered_map<string, int>& id_to_index) {
         auto it = id_to_index.find(query_str);
@@ -355,9 +705,9 @@ namespace pc_mat {
     }
 
     // Read queries from file
-    vector<int> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index,
+    vector<uint32_t> read_queries_from_file(const string& filename, const unordered_map<string, int>& id_to_index,
             std::vector<std::string>& id_vec) {
-        vector<int> queries;
+        vector<uint32_t> queries;
         ifstream file(filename);
         
         if (!file) {
@@ -388,8 +738,8 @@ namespace pc_mat {
     }
 
     // Read queries from stdin
-    vector<int> read_queries_from_stdin(const unordered_map<string, int>& id_to_index) {
-        vector<int> queries;
+    vector<uint32_t> read_queries_from_stdin(const unordered_map<string, int>& id_to_index) {
+        vector<uint32_t> queries;
         string line;
         
         while (getline(cin, line)) {
@@ -470,8 +820,8 @@ namespace pc_mat {
 
     vector<std::vector<uint32_t> > load_neighbors_for_slice(
         const string& matrix_folder,
-        const vector<int>& rows,
-        const vector<int>& cols,
+        const vector<uint32_t>& rows,
+        const vector<uint32_t>& cols,
         int total_vectors,
         int num_shards
     )
@@ -556,8 +906,8 @@ namespace pc_mat {
         return results;
     }
 
-    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::vector<int32_t>& row_queries_vec, 
-        std::vector<int32_t>& col_queries_vec, int32_t total_vectors,
+    std::vector<std::vector<float> > query_sliced(std::string matrix_folder, std::vector<uint32_t>& row_queries_vec, 
+        std::vector<uint32_t>& col_queries_vec, int32_t total_vectors,
         std::vector<float>& vector_norms
     ){
         
@@ -591,6 +941,107 @@ namespace pc_mat {
             all_results[q] = std::move(res);
         }
         return all_results;
+    }
+
+
+    void update_matrix_for_shard(std::string matrix_folder, std::string new_shard_folder, uint64_t start_row, uint64_t end_row, std::vector<uint32_t>& acc_vec, std::vector<uint32_t>& new_index_to_prev_index_vec, uint32_t total_vectors_prev, uint32_t num_shards){
+
+        std::string bin_out_fn = new_shard_folder + "/matrix.bin";
+        std::ofstream bin_out(bin_out_fn, std::ios::binary);
+
+        std::string ngh_out_fn = new_shard_folder + "/neighbor_start.bin";
+        std::ofstream ngh_out(ngh_out_fn, std::ios::binary);
+
+        string index_filename = new_shard_folder + "/row_index.bin";
+        ofstream index_out(index_filename, ios::binary);
+
+        std::vector<uint64_t> curr_pos_vec;
+        std::vector<uint32_t> start_neighbor;
+        curr_pos_vec.reserve(end_row - start_row + 1);
+        start_neighbor.reserve(end_row - start_row + 1);
+        
+        // std::vector<uint32_t> prev_rows;
+        // prev_rows.reserve(end_row - start_row + 1);
+        // for(uint64_t row = start_row, idx = 0; row<end_row; row++, idx++){
+        //     prev_rows.push_back(new_index_to_prev_index_vec[row]);
+        // }
+
+        constexpr size_t CHUNK_SIZE = 512;
+        for (uint64_t chunk_begin = start_row;
+            chunk_begin < end_row;
+            chunk_begin += CHUNK_SIZE)
+        {
+            uint64_t chunk_end = std::min(chunk_begin + CHUNK_SIZE, end_row);
+
+            std::vector<uint32_t> prev_rows;
+            prev_rows.reserve(chunk_end - chunk_begin);
+
+            for (uint64_t row = chunk_begin; row < chunk_end; ++row) {
+                prev_rows.push_back(new_index_to_prev_index_vec[row]);
+            }
+        
+
+            auto results = load_neighbors_for_slice(matrix_folder, prev_rows, acc_vec, total_vectors_prev, num_shards);
+            for(size_t i=0; i<results.size(); i++){
+                std::vector<uint32_t> neighbor_indx_vec;
+                std::vector<uint16_t> neighbor_jaccard_vec;
+                const auto& result_row_vec = results[i];
+                neighbor_indx_vec.reserve(result_row_vec.size());
+                neighbor_jaccard_vec.reserve(result_row_vec.size());
+
+                for(size_t ni=0; ni<result_row_vec.size(); ni++){
+                    if(result_row_vec[ni] == 0) continue;
+                    neighbor_indx_vec.push_back(ni);
+                    neighbor_jaccard_vec.push_back(result_row_vec[ni]);
+                }
+
+                uint64_t current_pos = static_cast<uint64_t>(bin_out.tellp());
+                curr_pos_vec.push_back(current_pos);
+                if(neighbor_indx_vec.size() == 0){
+                    start_neighbor.push_back(0); // will not execute at the current setup
+                }
+                else{
+                    start_neighbor.push_back(neighbor_indx_vec[0]);
+                }
+
+                std::vector<uint64_t> delta_cols;
+                delta_cols.reserve(neighbor_indx_vec.size());
+                for (size_t k = 1; k < neighbor_indx_vec.size(); ++k) {
+                    delta_cols.push_back(neighbor_indx_vec[k] - neighbor_indx_vec[k-1]);
+                }
+                bits::compact_vector cv_jc;
+                cv_jc.build(neighbor_jaccard_vec.begin(), neighbor_jaccard_vec.size());
+                cv_jc.save(bin_out);
+
+                if(neighbor_jaccard_vec.size() == 1) continue;
+
+                bits::rice_sequence<> rs_delta;
+                rs_delta.encode(delta_cols.begin(), delta_cols.size());
+                rs_delta.save(bin_out);
+
+            }
+        }
+
+        bin_out.flush();     
+        bin_out.close();
+        
+
+        std::vector<uint64_t> curr_pos_delta_vec;
+        curr_pos_delta_vec.reserve(curr_pos_vec.size());
+
+        // curr_pos_vec[0] is always 0;
+        for(size_t i=1; i<curr_pos_vec.size(); i++){
+            curr_pos_delta_vec.push_back(curr_pos_vec[i] - curr_pos_vec[i-1]);
+        }
+        bits::compact_vector cv_cps; // Compact Vector Current PositionS
+        cv_cps.build(curr_pos_delta_vec.begin(), curr_pos_delta_vec.size());
+        cv_cps.save(index_out);
+        index_out.close();
+
+        bits::rice_sequence<> new_start_nei_rs; 
+        new_start_nei_rs.encode(start_neighbor.begin(), start_neighbor.size());
+        new_start_nei_rs.save(ngh_out);
+        ngh_out.close();
     }
 
 } // namespace pc_mat

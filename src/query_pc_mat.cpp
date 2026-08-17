@@ -61,7 +61,7 @@ void query_nearest_neighbors(
     std::unordered_map<std::string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
     
     std::vector<std::string> query_id_vec;    
-    std::vector<int32_t> queries;
+    std::vector<uint32_t> queries;
 
     if (!query_file.empty()) {
         queries = pc_mat::read_queries_from_file(query_file, id_to_index, query_id_vec);
@@ -199,7 +199,7 @@ void query_sliced_matrix(
     std::vector<std::string> identifiers;
     std::unordered_map<std::string, int> id_to_index = pc_mat::load_vector_identifiers(db_folder, identifiers);
 
-    std::vector<int32_t> row_query_vec, col_query_vec;
+    std::vector<uint32_t> row_query_vec, col_query_vec;
     std::vector<std::string> row_vec, col_vec;
 
     row_query_vec = pc_mat::read_queries_from_file(row_file, id_to_index, row_vec);
@@ -285,7 +285,7 @@ void query_sliced_matrix(
             if (my_batch_start < total_rows) {
                 size_t my_batch_end = std::min(my_batch_start + batch_size, total_rows);
 
-                std::vector<int32_t> row_sub_queries(
+                std::vector<uint32_t> row_sub_queries(
                     row_query_vec.begin() + my_batch_start, 
                     row_query_vec.begin() + my_batch_end
                 );
@@ -393,8 +393,294 @@ void filter_matrix(std::string matrix_folder, std::string db_folder, std::string
 
         uint64_t start_row = shard_idx * rows_per_shard;
         uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
+        if(start_row < end_row){
+            pc_mat::filter_matrix_for_shard(shard_folder, new_shard_folder, start_row, end_row, filter);
+        }
+            
+        auto shard_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = shard_end - shard_start;
+        auto shard_time = get_time_unit(elapsed.count());
+        #pragma omp critical
+        {
+            std::cout << "Shard " << shard_idx
+                      << " completed in "
+                      << std::fixed << std::setprecision(2)
+                      << shard_time.first << " "
+                      << shard_time.second << '\n';
+        }
+    }
+    
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
 
-        pc_mat::filter_matrix_for_shard(shard_folder, new_shard_folder, start_row, end_row, filter);
+    std::cout << "\nAll shards completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
+
+
+void store_only_top_n_matrix(std::string matrix_folder, std::string db_folder, std::string store_folder, uint32_t num_acc, int num_threads){
+    uint64_t total_vectors = pc_mat::get_total_vectors(db_folder);
+    uint64_t num_shards = pc_mat::discover_shards(matrix_folder);
+    uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    omp_set_num_threads(num_threads);
+
+    #pragma omp parallel for schedule(static)
+    
+    for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
+        auto shard_start = std::chrono::high_resolution_clock::now();
+        std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+        std::string new_shard_folder = store_folder + "/shard_" + std::to_string(shard_idx);
+        fs::path dir_path = new_shard_folder;
+        fs::create_directories(dir_path);
+        #pragma omp critical
+        {
+            std::cout<<"Writing filtered matrix in "<<new_shard_folder<<std::endl;
+        }
+        
+        uint64_t start_row = shard_idx * rows_per_shard;
+        uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
+        if(start_row < end_row){
+            pc_mat::store_only_top_n_matrix_for_shard(shard_folder, new_shard_folder, start_row, end_row, num_acc);
+        }
+            
+        auto shard_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = shard_end - shard_start;
+        auto shard_time = get_time_unit(elapsed.count());
+        #pragma omp critical
+        {
+            std::cout << "Shard " << shard_idx
+                      << " completed in "
+                      << std::fixed << std::setprecision(2)
+                      << shard_time.first << " "
+                      << shard_time.second << '\n';
+        }
+    }
+    
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll shards completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
+
+void store_only_top_n_wfil_matrix(std::string matrix_folder, std::string db_folder, std::string store_folder, uint32_t num_acc, double filter, int num_threads){
+    uint64_t total_vectors = pc_mat::get_total_vectors(db_folder);
+    uint64_t num_shards = pc_mat::discover_shards(matrix_folder);
+    uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    omp_set_num_threads(num_threads);
+
+    #pragma omp parallel for schedule(static)
+    
+    for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
+        auto shard_start = std::chrono::high_resolution_clock::now();
+        std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+        std::string new_shard_folder = store_folder + "/shard_" + std::to_string(shard_idx);
+        fs::path dir_path = new_shard_folder;
+        fs::create_directories(dir_path);
+        #pragma omp critical
+        {
+            std::cout<<"Writing filtered matrix in "<<new_shard_folder<<std::endl;
+        }
+        
+        uint64_t start_row = shard_idx * rows_per_shard;
+        uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
+        if(start_row < end_row){
+            pc_mat::store_only_top_n_wfil_matrix_for_shard(shard_folder, new_shard_folder, start_row, end_row, num_acc, filter);
+        }
+            
+        auto shard_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = shard_end - shard_start;
+        auto shard_time = get_time_unit(elapsed.count());
+        #pragma omp critical
+        {
+            std::cout << "Shard " << shard_idx
+                      << " completed in "
+                      << std::fixed << std::setprecision(2)
+                      << shard_time.first << " "
+                      << shard_time.second << '\n';
+        }
+    }
+    
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll shards completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
+
+
+void write_neighbor_from_matrix(std::string matrix_folder, std::string db_folder,int num_threads){
+    
+    uint64_t total_vectors = pc_mat::get_total_vectors(db_folder);
+    uint64_t num_shards = pc_mat::discover_shards(matrix_folder);
+    uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    omp_set_num_threads(num_threads);
+
+    #pragma omp parallel for schedule(static)
+    
+    for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
+        auto shard_start = std::chrono::high_resolution_clock::now();
+        std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+
+        uint64_t start_row = shard_idx * rows_per_shard;
+        uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
+        if(start_row < end_row){
+            pc_mat::save_neighbors_for_shard(shard_folder, start_row, end_row);
+        }
+            
+        auto shard_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = shard_end - shard_start;
+        auto shard_time = get_time_unit(elapsed.count());
+        #pragma omp critical
+        {
+            std::cout << "Shard " << shard_idx
+                      << " completed in "
+                      << std::fixed << std::setprecision(2)
+                      << shard_time.first << " "
+                      << shard_time.second << '\n';
+        }
+    }
+    
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll shards completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
+void write_jaccard_estimates(std::string matrix_folder, std::string db_folder, std::string store_folder, int num_threads){
+    
+    uint64_t total_vectors = pc_mat::get_total_vectors(db_folder);
+    uint64_t num_shards = pc_mat::discover_shards(matrix_folder);
+    uint64_t rows_per_shard = (total_vectors + num_shards - 1) / num_shards;
+
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    omp_set_num_threads(num_threads);
+
+    #pragma omp parallel for schedule(static)
+    
+    for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
+        auto shard_start = std::chrono::high_resolution_clock::now();
+        std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+        std::string new_shard_folder = store_folder + "/shard_" + std::to_string(shard_idx);
+        fs::path dir_path = new_shard_folder;
+        fs::create_directories(dir_path);
+        
+        uint64_t start_row = shard_idx * rows_per_shard;
+        uint64_t end_row = min(start_row + rows_per_shard, total_vectors);
+        if(start_row < end_row){
+            pc_mat::write_jaccard_for_shard(shard_folder, new_shard_folder, start_row, end_row);
+        }
+            
+        auto shard_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = shard_end - shard_start;
+        auto shard_time = get_time_unit(elapsed.count());
+        #pragma omp critical
+        {
+            std::cout << "Shard " << shard_idx
+                      << " completed in "
+                      << std::fixed << std::setprecision(2)
+                      << shard_time.first << " "
+                      << shard_time.second << '\n';
+        }
+    }
+    
+    auto end_total = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_total - start_total;
+    auto time_unit = get_time_unit(elapsed.count());
+
+    std::cout << "\nAll shards completed in " << std::fixed << std::setprecision(2) 
+              << time_unit.first << "\t" << time_unit.second << "\n" << std::endl;
+}
+
+
+std::string get_whitespace_removed(std::string &s){
+    const std::string WHITESPACE = " \n\r\t\f\v";
+
+    size_t end = s.find_last_not_of(WHITESPACE);
+    if (end != std::string::npos) {
+        s.erase(end + 1);
+    } else {
+        s.clear(); // The string is entirely whitespace
+    }
+    return s;
+}
+
+void update_matrix_from_list(std::string matrix_folder, std::string db_folder, std::string store_folder, std::string acc_db_folder, int num_threads){
+    std::vector<float> vector_norms;
+    pc_mat::load_vector_norms(db_folder, vector_norms);
+
+    std::vector<std::string> identifiers_prev;
+    std::unordered_map<std::string, int> id_to_index_prev = pc_mat::load_vector_identifiers(db_folder, identifiers_prev);
+
+    
+    std::vector<std::string> identifiers_new;
+    std::unordered_map<std::string, int> id_to_index_new = pc_mat::load_vector_identifiers(acc_db_folder, identifiers_new);
+
+    uint64_t total_vectors_prev = pc_mat::get_total_vectors(db_folder);
+    uint64_t num_shards = pc_mat::discover_shards(matrix_folder);
+    uint64_t rows_per_shard_prev = (total_vectors_prev + num_shards - 1) / num_shards;
+
+    std::vector<uint32_t> acc_vec;
+    
+    std::vector<uint32_t> new_index_to_prev_index_vec(identifiers_new.size()); //works like a map
+    
+    for(size_t i=0; i<identifiers_new.size(); i++){
+        uint32_t prev_index = id_to_index_prev.at(identifiers_new[i]);
+        acc_vec.push_back(prev_index);
+        new_index_to_prev_index_vec[i] = prev_index;
+
+    }
+   
+
+    uint64_t total_vectors_new = acc_vec.size();
+    uint64_t rows_per_shard_new = (total_vectors_new + num_shards - 1) / num_shards;
+    
+    auto start_total = std::chrono::high_resolution_clock::now();
+
+    omp_set_num_threads(num_threads);
+
+    #pragma omp parallel for schedule(static)
+    
+    for(size_t shard_idx=0; shard_idx < num_shards; shard_idx++){
+        auto shard_start = std::chrono::high_resolution_clock::now();
+        std::string shard_folder = matrix_folder + "/shard_" + std::to_string(shard_idx);
+        std::string new_shard_folder = store_folder + "/shard_" + std::to_string(shard_idx);
+
+        fs::path dir_path = new_shard_folder;
+        fs::create_directories(dir_path);
+        
+        uint64_t start_row = shard_idx * rows_per_shard_new;
+        uint64_t end_row = min(start_row + rows_per_shard_new, total_vectors_new);
+
+        #pragma omp critical
+        {
+            std::cout<<"Writing updated matrix in "<<new_shard_folder<<std::endl;
+            std::cout<<start_row<<" "<<end_row<<std::endl;
+        }
+
+        if(start_row < end_row){
+            pc_mat::update_matrix_for_shard(matrix_folder, new_shard_folder, start_row, end_row, acc_vec, new_index_to_prev_index_vec, total_vectors_prev, num_shards);
+        }
+
+        
         auto shard_end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed = shard_end - shard_start;
         auto shard_time = get_time_unit(elapsed.count());
@@ -430,11 +716,12 @@ std::string get_file_extension(std::string filename){
 int main(int argc, char* argv[]) {
 
     // Command line arguments
-    string matrix_folder, db_folder, filtered_matrix_folder;
+    string matrix_folder, db_folder, filtered_matrix_folder, acc_db_folder;
     string query_file;
     std::string row_file, col_file;
     // string neighbor_fn = "neighbors.txt";
     uint32_t top_n = 10, batch_size = 1000;
+    uint64_t num_acc = 10;
     double filter = 0;
     int n_threads = 1;
     vector<string> query_ids_str;
@@ -449,6 +736,11 @@ int main(int argc, char* argv[]) {
     bool use_query_ids = false;
     bool use_row_col_files = false;
     bool use_filter = false;
+    bool update_matrix = false;
+    bool save_neighbors = false;
+    bool only_top_neighbors = false;
+    bool only_topn_wfil = false;
+    bool count_jaccard = false;
 
     // Change this whenever the file encoding is modified
     const int encoding_version = 1;
@@ -460,14 +752,35 @@ int main(int argc, char* argv[]) {
             (clipp::option("--query_file").set(use_query_file) & clipp::value("file", query_file)) |
             (clipp::option("--query_ids").set(use_query_ids) & clipp::values("ids", query_ids_str)) |
             (
-            clipp::option("--row_file").set(use_row_col_files) & clipp::value("row", row_file) &
-            clipp::option("--col_file") & clipp::value("col", col_file)
+                clipp::option("--row_file").set(use_row_col_files) & clipp::value("row", row_file) &
+                clipp::option("--col_file") & clipp::value("col", col_file)
             ) |
             (
-                clipp::option("--filter").set(use_filter) & clipp::value("double", filter) & 
+                clipp::option("--nf").set(only_topn_wfil) & clipp::value("uint64_t", num_acc) & clipp::value("double", filter) & 
                 clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
+            ) 
+            // |
+            // (
+            //     clipp::option("--filter").set(use_filter) & clipp::value("double", filter) & 
+            //     clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
 
-            )
+            // ) |
+            // (
+            //     clipp::option("--update").set(update_matrix) & clipp::value("folder", acc_db_folder) & 
+            //     clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
+
+            // ) |
+            // (
+            //     clipp::option("--nei").set(save_neighbors)
+            // ) |
+            // (
+            //     clipp::option("--only").set(only_top_neighbors) & clipp::value("uint64_t", num_acc) & 
+            //     clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
+            // ) |
+            // (
+            //     clipp::option("--count").set(count_jaccard) & 
+            //     clipp::option("--out") & clipp::value("folder", filtered_matrix_folder)
+            // )
 
             // | clipp::option("--stdin").set(read_from_stdin)
         ),
@@ -491,6 +804,7 @@ int main(int argc, char* argv[]) {
         cout << "  --row_file      : File containing query row IDs (one per line)\n";
         cout << "  --col_file      : File containing query col IDs (one per line)\n";
         cout << "  --filter        : Filter values below threshold from matrix\n";
+        cout << "  --nf            : Filter matrix to include at least top N neighbors and all neighbors with Jaccard >= J\n";
         cout << "  --out           : Output folder for the filtered matrix\n";
         cout << "  --top           : Number of top jaccard values to show [default 10]\n";
         cout << "  --batch_size    : Number of queries to process per batch [default 1000]\n";
@@ -507,7 +821,7 @@ int main(int argc, char* argv[]) {
     if (matrix_folder.empty()) {
         show_error_and_exit("Error: matrix folder is required.");
     }
-    if(!use_query_file && !use_query_ids && !use_row_col_files && !use_filter){
+    if(!use_query_file && !use_query_ids && !use_row_col_files && !use_filter && !update_matrix && !save_neighbors && !only_top_neighbors && !only_topn_wfil && !count_jaccard){
         show_error_and_exit("No specific action is given.");
     }
 
@@ -529,6 +843,10 @@ int main(int argc, char* argv[]) {
     }
 
     if(use_filter && filtered_matrix_folder.empty()){
+        show_error_and_exit("No output folder provided.");
+    }
+
+    if(update_matrix && filtered_matrix_folder.empty()){
         show_error_and_exit("No output folder provided.");
     }
 
@@ -582,6 +900,21 @@ int main(int argc, char* argv[]) {
     }
     else if(use_filter){
         filter_matrix(matrix_folder, db_folder, filtered_matrix_folder, filter, n_threads);
+    }
+    else if(update_matrix){
+        update_matrix_from_list(matrix_folder, db_folder, filtered_matrix_folder, acc_db_folder, n_threads);
+    }
+    else if(save_neighbors){
+        write_neighbor_from_matrix(matrix_folder, db_folder, n_threads);
+    }
+    else if(only_top_neighbors){
+        store_only_top_n_matrix(matrix_folder, db_folder, filtered_matrix_folder, num_acc, n_threads);
+    }
+    else if(only_topn_wfil){
+        store_only_top_n_wfil_matrix(matrix_folder, db_folder, filtered_matrix_folder, num_acc, filter, n_threads);
+    }
+    else if(count_jaccard){
+        write_jaccard_estimates(matrix_folder, db_folder, filtered_matrix_folder, n_threads);
     }
     else{
         std::cerr<<"No query types specified. Aborting...\n";

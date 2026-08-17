@@ -68,10 +68,12 @@ void add_human_data(const std::string &db_folder, size_t dimension,
 void filter_and_write(
     const std::vector<std::pair<std::string, double>>& sample_norm_vec,
     const std::string& db_folder,
-    const size_t dimension)
+    const size_t dimension,
+    const std::unordered_set<std::string> wgs_set
+)
 {
     const size_t block_size = 2048;               // vectors per block
-    const size_t bytes_per_vector = dimension * sizeof(int32_t);
+    const size_t bytes_per_vector = dimension * sizeof(int16_t);
 
     std::ifstream vec_in(db_folder + "vectors.bin", std::ios::binary);
     if (!vec_in) {
@@ -80,7 +82,7 @@ void filter_and_write(
     }
 
     std::ofstream vec_out(db_folder + "filtered_vectors.bin", std::ios::binary);
-    std::ofstream meta_out(db_folder + "filtered_sample_norm.txt");
+    std::ofstream meta_out(db_folder + "filtered_vector_norms.txt");
 
     if (!vec_out || !meta_out) {
         std::cerr << "Failed to open output files\n";
@@ -97,7 +99,7 @@ void filter_and_write(
         size_t num_vectors = end - begin;
 
         // contiguous block buffer
-        std::vector<int32_t> buffer(num_vectors * dimension);
+        std::vector<int16_t> buffer(num_vectors * dimension);
 
         vec_in.read(reinterpret_cast<char*>(buffer.data()),
                     num_vectors * bytes_per_vector);
@@ -114,14 +116,16 @@ void filter_and_write(
 
             if (sample_norm_vec[global_i].second == 0)
                 continue;
+            if(wgs_set.count(sample_norm_vec[global_i].first) == 0) continue;
+            if(sample_norm_vec[global_i].first == "human_genome_sketches_merged") continue;
 
             // pointer to this vector inside the block
-            int32_t* vec_ptr = buffer.data() + i * dimension;
+            int16_t* vec_ptr = buffer.data() + i * dimension;
             vector<int16_t> updated_vector(dimension);
             for(size_t i=0; i<dimension; i++){
                 if(vec_ptr[i] > (int)std::numeric_limits<std::int16_t>::max() || 
                     vec_ptr[i] < (int)std::numeric_limits<std::int16_t>::min()){
-                    std::cout<<global_i<<" "<<i<<" "<<vec_ptr[i]<<" "<<sample_norm_vec[global_i].first << " "
+                    std::cout<<"FLAG: "<<global_i<<" "<<i<<" "<<vec_ptr[i]<<" "<<sample_norm_vec[global_i].first << " "
                      << sample_norm_vec[global_i].second
                     <<std::endl;
                 }
@@ -140,28 +144,63 @@ void filter_and_write(
                      << sample_norm_vec[global_i].second << "\n";
         }
     }
-    add_human_data(db_folder, dimension, vec_out, meta_out);
+    // add_human_data(db_folder, dimension, vec_out, meta_out);
     
     vec_in.close();
     vec_out.close();
     meta_out.close();
 }
 
+std::string get_whitespace_removed(std::string &s){
+    const std::string WHITESPACE = " \n\r\t\f\v";
 
+    size_t end = s.find_last_not_of(WHITESPACE);
+    if (end != std::string::npos) {
+        s.erase(end + 1);
+    } else {
+        s.clear(); // The string is entirely whitespace
+    }
+    return s;
+}
 
-
-void read_and_filter_vec(std::string &db_folder){
+void read_and_filter_vec(std::string &db_folder, std::string &wgs_file){
     int32_t dimension = 2048;
 
     std::ifstream norm_in(db_folder + "vector_norms.txt");
-
     vector<pair<string, double>> sample_norm_vec = get_sample_norm_vec(norm_in);
-    filter_and_write(sample_norm_vec, db_folder, dimension);
+    
+    std::ifstream wgs_in(wgs_file);
+    std::unordered_set<std::string> wgs_set;
+    std::string line;
+    int count = 0;
+    while(getline(wgs_in, line)){
+        wgs_set.insert(get_whitespace_removed(line));
+        if(count++ < 10) cout<<line<<endl;
+    }
+
+    
+    filter_and_write(sample_norm_vec, db_folder, dimension, wgs_set);
 }
+
+
+// void read_and_filter_vec(std::string &db_folder){
+//     int32_t dimension = 2048;
+
+//     std::ifstream norm_in(db_folder + "vector_norms.txt");
+
+//     vector<pair<string, double>> sample_norm_vec = get_sample_norm_vec(norm_in);
+//     filter_and_write(sample_norm_vec, db_folder, dimension);
+// }
 
 int main(int argc, char* argv[]) {
     std::string db_folder = argv[1];
-    read_and_filter_vec(db_folder);
+    std::string wgs_file = argv[2];
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+    read_and_filter_vec(db_folder, wgs_file);
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::seconds>(end_time - start_time);
+    std::cout<<"Completed in "<<duration.count()<<" seconds";
 
     return 0;
 }
